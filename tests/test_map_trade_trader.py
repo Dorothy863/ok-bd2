@@ -10,7 +10,6 @@ import cv2
 import numpy as np
 
 from src.tasks.map_trade.models import (
-    MERCHANT_CARD_ID,
     RECIPE_TEMPLATES,
     STORY_CARDS,
     CalendarEntry,
@@ -75,6 +74,9 @@ from src.tasks.map_trade.navigator_constants import (
 )
 from src.tasks.map_trade.progress import UTC_PLUS_8
 from src.tasks.map_trade.trader import (
+    Trader,
+)
+from src.tasks.map_trade.trader_constants import (
     BUY_ALL_FAVORITES_KEYWORD,
     BUY_ALL_FAVORITES_STABLE_HITS,
     BUY_CONFIRM_DIALOG_REGION,
@@ -100,7 +102,6 @@ from src.tasks.map_trade.trader import (
     SALE_SLIDER_REGION,
     SELL_MODE_POINT,
     SHOP_MODE_TITLE_REGION,
-    Trader,
 )
 from src.tasks.map_trade.vision import Vision
 from src.tasks.MapTradeTask import MapTradeTask
@@ -317,9 +318,7 @@ class SellFlowTest(unittest.TestCase):
         trader._resolve_sale_entries = lambda: [
             CalendarEntry("水果罐头", "S2:苍蓝魔女")
         ]
-        trader.navigator = SimpleNamespace(
-            reach_merchant_shop=lambda: self.fail("买卖连续执行时不应重新从主页进商店")
-        )
+        trader.navigator = SimpleNamespace()
         trader._switch_from_completed_buy_to_sell = lambda: actions.append("switch") or True
         trader.sell_max_price_items = lambda: actions.append("sell") or True
 
@@ -2191,37 +2190,6 @@ class BuyEntryTest(unittest.TestCase):
                 self.assertFalse(vision.passes(match, MERCHANT_CLICK_LOCATION_TEMPLATE))
                 self.assertEqual([], clicks)
 
-    def test_reach_merchant_shop_enters_merchant_card_via_trade_confirmation(self):
-        task = SimpleNamespace(
-            config={},
-            sleep=lambda *_args: None,
-            log_warning=lambda *_args: None,
-            info_set=lambda *_args: None,
-        )
-        vision = SimpleNamespace(
-            capture=lambda: np.zeros((1080, 1920, 3), dtype=np.uint8),
-            match=lambda *_args: MatchResult(-1.0, (0, 0), (0, 0)),
-            passes=lambda *_args: False,
-        )
-        navigator = Navigator(task, vision)
-        navigator.classify_trade = lambda: ScreenState.UNKNOWN
-        entered_cards = []
-
-        def select_trade_card(card_id):
-            entered_cards.append(card_id)
-            return NavigationResult(False, ScreenState.UNKNOWN, "跑商箱庭确认超时")
-
-        navigator.select_trade_card = select_trade_card
-        navigator.select_card = lambda *_args: self.fail(
-            "跑商入口必须使用跑商专用箱庭确认，不得走剧情箱庭确认"
-        )
-
-        result = navigator.reach_merchant_shop()
-
-        self.assertEqual([MERCHANT_CARD_ID], entered_cards)
-        self.assertFalse(result.success)
-        self.assertEqual("跑商箱庭确认超时", result.message)
-
     def test_merchant_interaction_miss_fails_without_navigation_fallback(self):
         frame = np.zeros((1080, 1920, 3), dtype=np.uint8)
         failed_match = MatchResult(-1.0, (0, 0), (0, 0))
@@ -2250,14 +2218,11 @@ class BuyEntryTest(unittest.TestCase):
             click_template=lambda *_args, **_kwargs: fallback_calls.append("click_template"),
         )
         navigator = Navigator(task, vision)
-        navigator.classify_trade = lambda: ScreenState.SANDBOX
 
         with patch("src.tasks.map_trade.navigator_trade.monotonic", side_effect=(0.0, 3.0)):
-            result = navigator.reach_merchant_shop()
+            clicked = navigator._click_merchant_interaction(timeout=2.0, after_sleep=1.2)
 
-        self.assertFalse(result.success)
-        self.assertEqual(ScreenState.SANDBOX, result.state)
-        self.assertEqual(MERCHANT_CLICK_LOCATION_FAILURE_MESSAGE, result.message)
+        self.assertFalse(clicked)
         self.assertEqual([], clicks)
         self.assertEqual([], fallback_calls)
 
@@ -2269,71 +2234,6 @@ class BuyEntryTest(unittest.TestCase):
                 for path in template_root.joinpath("image", "green").glob("Merchant_*.png")
             )
         )
-
-    def test_sell_only_shop_entry_fails_when_shop_ocr_miss_after_positive_entry_click(self):
-        click_ocr_results = iter((False, True))
-        reference_clicks = []
-        warnings = []
-        task = SimpleNamespace(
-            config={},
-            sleep=lambda *_args: None,
-            log_warning=warnings.append,
-        )
-        vision = SimpleNamespace(
-            click_ocr=lambda *_args, **_kwargs: next(click_ocr_results),
-            click_reference=lambda *args, **kwargs: reference_clicks.append((args, kwargs)),
-            capture=lambda: np.zeros((1080, 1920, 3), dtype=np.uint8),
-            match=lambda *_args: MatchResult(-1.0, (0, 0), (0, 0)),
-            passes=lambda *_args: False,
-            threshold_for=lambda spec: spec.threshold,
-            template_brightness_ratio=lambda *_args: 0.0,
-            ocr_text=lambda *_args, **_kwargs: "",
-            simplify=lambda value: value,
-        )
-        navigator = Navigator(task, vision)
-        navigator.wait_trade_state = lambda wanted, timeout: ScreenState.MERCHANT_DIALOG
-
-        result = navigator._bargain_and_enter_shop()
-
-        self.assertFalse(result.success)
-        self.assertEqual(ScreenState.MERCHANT_DIALOG, result.state)
-        self.assertEqual([], reference_clicks)
-        self.assertIn("商店页OCR未确认", result.message)
-        self.assertFalse(any("商店页OCR未确认" in warning for warning in warnings))
-
-    def test_shop_entry_missing_never_clicks_blind_point(self):
-        click_ocr_calls = []
-        reference_clicks = []
-        task = SimpleNamespace(
-            config={},
-            sleep=lambda *_args: None,
-            log_warning=lambda *_args, **_kwargs: None,
-        )
-        vision = SimpleNamespace(
-            click_ocr=lambda *args, **kwargs: click_ocr_calls.append((args, kwargs)) or False,
-            click_reference=lambda *args, **kwargs: reference_clicks.append((args, kwargs)),
-            capture=lambda: np.zeros((1080, 1920, 3), dtype=np.uint8),
-            match=lambda *_args: MatchResult(-1.0, (0, 0), (0, 0)),
-            passes=lambda *_args: False,
-            threshold_for=lambda spec: spec.threshold,
-            template_brightness_ratio=lambda *_args: 0.0,
-            ocr_text=lambda *_args, **_kwargs: "",
-            simplify=lambda value: value,
-        )
-        navigator = Navigator(task, vision)
-
-        result = navigator._bargain_and_enter_shop()
-
-        self.assertFalse(result.success)
-        self.assertEqual([], reference_clicks)
-        entry_calls = [
-            call
-            for _args, kwargs in click_ocr_calls
-            for call in [kwargs]
-            if "商店入口" in str(call.get("name", ""))
-        ]
-        self.assertEqual(3, len(entry_calls))
-        self.assertIn("未识别到商店/进入商店入口", result.message)
 
 
 class BuyPhaseAndClassifyTest(unittest.TestCase):

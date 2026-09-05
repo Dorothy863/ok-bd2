@@ -21,8 +21,6 @@ from src.tasks.map_trade.navigator_constants import CHAPTER_HOME_POINT
 from src.tasks.MapCollectionTask import MapCollectionTask
 from src.tasks.MapTradeTask import MapTradeTask
 from src.tasks.PVPTask import (
-    ENTRY_REFERENCE_HEIGHT,
-    ENTRY_REFERENCE_WIDTH,
     HOME_GACHA_OCR_ROI,
     LOADING_TEMPLATE,
     PVP_AUTO_BATTLE_CLICK_REFERENCE,
@@ -129,23 +127,6 @@ class PVPTaskHelperTest(unittest.TestCase):
         self.assertEqual(631 / REFERENCE_HEIGHT, calls["y"])
         self.assertEqual(1.0, calls["after_sleep"])
 
-    def test_entry_click_uses_2560_by_1440_ratios(self):
-        task = object.__new__(PVPTask)
-        calls = {}
-
-        def fake_operate_click(x, y, after_sleep=0):
-            calls["x"] = x
-            calls["y"] = y
-            calls["after_sleep"] = after_sleep
-
-        task.operate_click = fake_operate_click
-
-        task._click_entry_reference(2258, 1307, after_sleep=1.0)
-
-        self.assertEqual(2258 / ENTRY_REFERENCE_WIDTH, calls["x"])
-        self.assertEqual(1307 / ENTRY_REFERENCE_HEIGHT, calls["y"])
-        self.assertEqual(1.0, calls["after_sleep"])
-
     def test_quick_pack_uses_requested_template(self):
         self.assertEqual("image/green/QuickSwitchPlayIco.png", QUICK_PACK_TEMPLATE.file_name)
         self.assertEqual("快速切换按钮阈值", QUICK_PACK_TEMPLATE.threshold_key)
@@ -243,18 +224,6 @@ class PVPTaskHelperTest(unittest.TestCase):
         self.assertFalse(PVPTask._passes(task, low_zncc, QUICK_PACK_TEMPLATE))
         self.assertTrue(PVPTask._passes(task, valid, QUICK_PACK_TEMPLATE))
         self.assertFalse(PVPTask._passes(task, unsafe_template_score, QUICK_PACK_TEMPLATE))
-
-    def test_relative_roi_uses_frame_ratios(self):
-        frame = np.arange(1080 * 1920, dtype=np.int32).reshape((1080, 1920))
-
-        left, top, crop = PVPTask._relative_roi_frame(
-            frame,
-            QUICK_PACK_TEMPLATE.relative_roi,
-        )
-
-        self.assertEqual((480, 918), (left, top))
-        self.assertEqual((162, 768), crop.shape)
-        np.testing.assert_array_equal(crop, frame[918:1080, 480:1248])
 
     def test_crop_reference_scales_roi_to_frame_size(self):
         frame = np.arange(720 * 1280, dtype=np.int32).reshape((720, 1280))
@@ -1230,76 +1199,6 @@ class PVPTaskHelperTest(unittest.TestCase):
         self.assertEqual(
             (699, 276, 524, 528),
             PVPTask._screen_reference_roi_to_reference_roi(PVP_RESULT_SCREEN_ROI),
-        )
-
-    def test_pvp_label_click_point_uses_leftmost_lower_label(self):
-        boxes = [
-            SimpleNamespace(
-                name="战斗玩法游戏卡带3/3可进行PVP",
-                x=470,
-                y=590,
-                width=360,
-                height=30,
-            ),
-            SimpleNamespace(name="PvP", x=1500, y=775, width=56, height=28),
-            SimpleNamespace(name="PvP", x=410, y=775, width=56, height=28),
-        ]
-
-        self.assertEqual((438, 697), PVPTask._pvp_label_click_point(boxes, 1920, 1080))
-
-    def test_pvp_label_click_point_ignores_upper_label(self):
-        boxes = [SimpleNamespace(name="PvP", x=410, y=420, width=56, height=28)]
-
-        self.assertIsNone(PVPTask._pvp_label_click_point(boxes, 1920, 1080))
-
-    def test_ocr_requirements_use_per_keyword_confidence(self):
-        task = object.__new__(PVPTask)
-        entries = [
-            ("游戏卡珍藏集", 0.91),
-            ("角色游戏卡", 0.70),
-            ("战斗玩法游戏卡带", 0.76),
-        ]
-
-        self.assertTrue(
-            PVPTask._ocr_requirements_met(
-                task,
-                entries,
-                [
-                    (r"游戏卡珍藏[集级]", 0.90),
-                    (r"角色游戏卡", 0.70),
-                    (r"战斗玩法游戏卡带", 0.70),
-                ],
-            )
-        )
-        self.assertTrue(
-            PVPTask._ocr_requirements_met(
-                task,
-                [
-                    ("游戏卡珍藏级", 0.91),
-                    ("角色游戏卡", 0.80),
-                    ("战斗玩法游戏卡带", 0.80),
-                ],
-                [
-                    (r"游戏卡珍藏[集级]", 0.90),
-                    (r"角色游戏卡", 0.70),
-                    (r"战斗玩法游戏卡带", 0.70),
-                ],
-            )
-        )
-        self.assertFalse(
-            PVPTask._ocr_requirements_met(
-                task,
-                [
-                    ("游戏卡珍藏集", 0.89),
-                    ("角色游戏卡", 0.80),
-                    ("战斗玩法游戏卡带", 0.80),
-                ],
-                [
-                    (r"游戏卡珍藏[集级]", 0.90),
-                    (r"角色游戏卡", 0.70),
-                    (r"战斗玩法游戏卡带", 0.70),
-                ],
-            )
         )
 
     def test_run_falls_back_to_one_multiplier_when_ap_shortage(self):

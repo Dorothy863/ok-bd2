@@ -109,7 +109,6 @@ class AutoLoginSequenceTest(unittest.TestCase):
         task = self._task()
         task._state = "waiting"
         task.capture_frame = lambda: np.zeros((10, 10, 3), dtype=np.uint8)
-        task._record_browndustx_text = lambda *_args, **_kwargs: None
         calls = []
 
         def fake_match(_frame, spec):
@@ -204,7 +203,6 @@ class AutoLoginSequenceTest(unittest.TestCase):
         task = self._task()
         task._state = "waiting"
         task.capture_frame = lambda: np.zeros((10, 10, 3), dtype=np.uint8)
-        task._record_browndustx_text = lambda *_args, **_kwargs: None
         calls = []
 
         def fake_match(_frame, spec):
@@ -238,7 +236,6 @@ class AutoLoginSequenceTest(unittest.TestCase):
         task = self._task()
         task._state = "waiting"
         task.capture_frame = lambda: np.zeros((1440, 2560, 3), dtype=np.uint8)
-        task._record_browndustx_text = lambda *_args, **_kwargs: None
         task._is_browndustx_confirm = lambda _frame, _confirm: True
         task._sleep_after_recognition = lambda: None
         clicks = []

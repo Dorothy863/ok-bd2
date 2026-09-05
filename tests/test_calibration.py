@@ -10,7 +10,6 @@ import src.tasks.trigger.AutoLoginTask as auto_login_task_module
 from src.tasks import (
     BargainLevelTask,
     BD2InputTestTask,
-    FreeGachaTask,
     QuickSuppressionTask,
 )
 from src.tasks.BaseBD2Task import BaseBD2Task
@@ -51,7 +50,6 @@ class ReferenceCalibrationTest(unittest.TestCase):
     def test_task_modules_derive_1080p_reference_from_shared_calibration(self):
         for module in (
             task_vision_mixin_module,
-            FreeGachaTask,
             pvp_task_module,
             square_goddess_task_module,
             auto_login_task_module,
@@ -68,8 +66,9 @@ class ReferenceCalibrationTest(unittest.TestCase):
             with self.subTest(module=module.__name__):
                 self.assertEqual(HD_720.width, module.HD720_REFERENCE_WIDTH)
                 self.assertEqual(HD_720.height, module.HD720_REFERENCE_HEIGHT)
-                self.assertEqual(QHD_1440.width, module.ENTRY_REFERENCE_WIDTH)
-                self.assertEqual(QHD_1440.height, module.ENTRY_REFERENCE_HEIGHT)
+        # 广场任务已删除基于 QHD_1440 的入场参考常量，仅 PVP 仍保留该标定。
+        self.assertEqual(QHD_1440.width, pvp_task_module.ENTRY_REFERENCE_WIDTH)
+        self.assertEqual(QHD_1440.height, pvp_task_module.ENTRY_REFERENCE_HEIGHT)
 
     def test_map_trade_vision_reference_is_720p_calibration(self):
         self.assertIs(HD_720, MAP_TRADE_REFERENCE)

@@ -217,8 +217,6 @@ RETURN_HOME_ANNOUNCEMENT_KEYWORD_GROUPS = (
     ("更新", "抢先看"),
     ("7天内不再显示", "前往查看"),
 )
-SHOP_ENTRY_CLICK_RETRIES = 3
-SHOP_ENTRY_CLICK_INTERVAL = 0.5
 SHOP_CLOSE_CLICK_RETRIES = 2
 SHOP_CLOSE_CLICK_INTERVAL = 0.3
 # 关闭按钮与主页按钮是稳定 UI 控件：优先用模板命中后点击识别中心，
@@ -385,7 +383,6 @@ MERCHANT_CLICK_LOCATION_TEMPLATE = TemplateSpec(
     min_zncc_score=0.90,
 )
 MERCHANT_CLICK_LOCATION_FAILURE_MESSAGE = "未识别到MerchantClickLocation.png"
-MERCHANT_DIALOG_CONFIRM_TIMEOUT = 3.0
 # 箱庭内角色位置保持在上次离开处，传送进剧情卡6后商人地标不一定在视野内；
 # 此时经小地图导航菜单的"商店"目的地让游戏自动寻路到商人，再重新识别地标。
 MERCHANT_NAV_GUIDE_TEMPLATE = TemplateSpec(

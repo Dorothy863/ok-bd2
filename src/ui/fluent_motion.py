@@ -141,10 +141,6 @@ def set_fluent_motion_enabled(flag: bool) -> None:
                     pass
 
 
-def fluent_motion_enabled() -> bool:
-    return _enabled
-
-
 def _page_offset_px(page: QWidget) -> int:
     return max(
         ENTRANCE_OFFSET_MIN_PX,

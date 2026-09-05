@@ -2,7 +2,7 @@ import unittest
 
 import numpy as np
 
-from src.tasks.BaseBD2Task import BaseBD2Task, green_mask_from_template
+from src.tasks.BaseBD2Task import green_mask_from_template
 
 
 class GreenMaskTest(unittest.TestCase):
@@ -78,30 +78,6 @@ class GreenMaskTest(unittest.TestCase):
         mask = green_mask_from_template(template)
 
         np.testing.assert_array_equal(mask, np.full((2, 3), 255, dtype=np.uint8))
-
-    def test_find_one_green_mask_passes_mask_function(self):
-        task = object.__new__(BaseBD2Task)
-        calls = {}
-
-        def fake_find_one(*args, **kwargs):
-            calls["args"] = args
-            calls["kwargs"] = kwargs
-            return "found"
-
-        task.find_one = fake_find_one
-
-        result = task.find_one_green_mask("feature", threshold=0.8)
-
-        self.assertEqual("found", result)
-        self.assertEqual(("feature",), calls["args"])
-        self.assertEqual(0.8, calls["kwargs"]["threshold"])
-        self.assertIn("mask_function", calls["kwargs"])
-
-        template = np.array([[[0, 255, 0], [255, 255, 255]]], dtype=np.uint8)
-        np.testing.assert_array_equal(
-            calls["kwargs"]["mask_function"](template),
-            np.array([[0, 255]], dtype=np.uint8),
-        )
 
 
 if __name__ == "__main__":

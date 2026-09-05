@@ -36,7 +36,6 @@ from src.utils.home_confirmation import (
 )
 from src.utils.image_utils import (
     reference_roi_frame,
-    relative_roi_frame,
     stabilize_template_match,
 )
 from src.utils.ocr_utils import normalize_ocr_text
@@ -890,22 +889,10 @@ class PVPTask(BaseBD2Task):
 
             break
 
+        # hub/leave/confirm 三种状态都在循环内返回，能到达这里只会是等待超时。
         self.info_set("PVP 升降级确认 OCR", text or "-")
-        if state != "confirm" or point is None:
-            self.info_set("PVP 返回主页", "未检测到 PVP 箱庭或升降级确认按钮")
-            return False
-
-        frame = self.capture_frame()
-        self.info_set(
-            "PVP 升降级确认",
-            f"OCR中心=({point[0]:.0f},{point[1]:.0f})",
-        )
-        self._click_frame_point(frame, point, after_sleep=1.0)
-        return self._wait_for_template(
-            PVP_MEDALS_TEMPLATE,
-            timeout=timeout,
-            name="PVP 箱庭",
-        )
+        self.info_set("PVP 返回主页", "未检测到 PVP 箱庭或升降级确认按钮")
+        return False
 
     def _wait_for_pvp_hub_or_confirm(
         self,
@@ -1093,32 +1080,6 @@ class PVPTask(BaseBD2Task):
             ):
                 return
 
-    def _try_pass_workaround(self) -> None:
-        self.log_info("镜中之战：快速卡带入场失败，尝试通行证路径兜底。")
-        self._click_reference(1063, 210, after_sleep=1.0)
-        if not self._wait_for_ocr_patterns(
-            [r"通行证"],
-            timeout=5.0,
-            name="PVP 通行证",
-            roi=(217, 14, 101, 49),
-        )[0]:
-            return
-
-        for _ in range(4):
-            frame = self.capture_frame()
-            text = self._ocr_text(frame, "pvp_pass_list", roi=(610, 151, 492, 362))
-            if self._matches_any(text, [r"镜中之战|PVP|战斗"]):
-                self._click_reference(1030, 320, after_sleep=2.0)
-                self._wait_loading_if_present("通行证进入 PVP")
-                return
-            frame_height, frame_width = frame.shape[:2]
-            self.drag_client(
-                (round(frame_width * 0.5), round(frame_height * 0.72)),
-                (round(frame_width * 0.5), round(frame_height * 0.35)),
-                duration=0.6,
-                after_sleep=1.0,
-            )
-
     def _click_template_until(
         self,
         spec: TemplateSpec,
@@ -1208,51 +1169,6 @@ class PVPTask(BaseBD2Task):
         self.info_set(name, f"{last_score:.3f}")
         return False
 
-    def _find_template_until(
-        self,
-        spec: TemplateSpec,
-        timeout: float,
-        name: str,
-        interval: float = 0.35,
-    ) -> tuple[MatchResult | None, tuple[int, int] | None]:
-        end_at = monotonic() + max(0.0, timeout)
-        last_score = -1.0
-        while monotonic() <= end_at:
-            frame = self.capture_frame()
-            result = self._match(frame, spec)
-            last_score = result.score
-            self.info_set(name, f"{result.score:.3f}")
-            if self._passes(result, spec):
-                frame_height, frame_width = frame.shape[:2]
-                return result, (frame_height, frame_width)
-            self.sleep(interval)
-
-        self.info_set(name, f"{last_score:.3f}")
-        return None, None
-
-    def _find_pvp_label_until(
-        self,
-        timeout: float,
-        name: str,
-        interval: float = 0.5,
-    ) -> tuple[tuple[int, int] | None, tuple[int, int] | None]:
-        end_at = monotonic() + max(0.0, timeout)
-        last_text = ""
-        while monotonic() <= end_at:
-            frame = self.capture_frame()
-            frame_height, frame_width = frame.shape[:2]
-            boxes = self._ocr_boxes(frame, name=name)
-            text = " ".join(getattr(box, "name", "") for box in boxes if getattr(box, "name", ""))
-            last_text = text or last_text
-            self.info_set(f"{name} OCR", text or "-")
-            point = self._pvp_label_click_point(boxes, frame_width, frame_height)
-            if point is not None:
-                return point, (frame_height, frame_width)
-            self.sleep(interval)
-
-        self.info_set(f"{name} OCR", last_text or "-")
-        return None, None
-
     def _wait_for_template(
         self,
         spec: TemplateSpec,
@@ -1332,49 +1248,6 @@ class PVPTask(BaseBD2Task):
                 if self._matches_any(extra_text, [pattern]):
                     self.info_set(info_key, extra_text)
                     break
-            self.sleep(interval)
-
-        return False, last_text
-
-    def _wait_for_ocr_requirements(
-        self,
-        requirements: list[tuple[str, float]],
-        timeout: float,
-        name: str,
-        roi: tuple[int, int, int, int] | None = None,
-        interval: float = 0.5,
-    ) -> tuple[bool, str]:
-        end_at = monotonic() + max(0.0, timeout)
-        last_text = ""
-        while monotonic() <= end_at:
-            frame = self.capture_frame()
-            entries = self._ocr_entries(frame, name=name, roi=roi)
-            text = " ".join(label for label, _confidence in entries)
-            last_text = text or last_text
-            self.info_set(f"{name} OCR", text or "-")
-            if self._ocr_requirements_met(entries, requirements):
-                return True, text
-            self.sleep(interval)
-
-        return False, last_text
-
-    def _wait_for_ocr_absent(
-        self,
-        patterns: list[str],
-        timeout: float,
-        name: str,
-        roi: tuple[int, int, int, int] | None = None,
-        interval: float = 0.5,
-    ) -> tuple[bool, str]:
-        end_at = monotonic() + max(0.0, timeout)
-        last_text = ""
-        while monotonic() <= end_at:
-            frame = self.capture_frame()
-            text = self._ocr_text(frame, name=name, roi=roi)
-            last_text = text or last_text
-            self.info_set(f"{name} OCR", text or "-")
-            if text and not self._matches_any(text, patterns):
-                return True, text
             self.sleep(interval)
 
         return False, last_text
@@ -1579,17 +1452,6 @@ class PVPTask(BaseBD2Task):
         right, bottom = PVPTask._mf_point(x + width, y + height)
         return left, top, max(1, right - left), max(1, bottom - top)
 
-    def _click_mf_reference(self, x: int, y: int, after_sleep: float = 0.0):
-        scaled_x, scaled_y = self._mf_point(x, y)
-        self._click_reference(scaled_x, scaled_y, after_sleep=after_sleep)
-
-    def _click_entry_reference(self, x: int, y: int, after_sleep: float = 0.0):
-        self.operate_click(
-            max(0.0, min(1.0, x / ENTRY_REFERENCE_WIDTH)),
-            max(0.0, min(1.0, y / ENTRY_REFERENCE_HEIGHT)),
-            after_sleep=after_sleep,
-        )
-
     def _click_screen_reference(self, x: int, y: int, after_sleep: float = 0.0):
         self.operate_click(
             max(0.0, min(1.0, x / ENTRY_REFERENCE_WIDTH)),
@@ -1635,58 +1497,8 @@ class PVPTask(BaseBD2Task):
             after_sleep=after_sleep,
         )
 
-    def _drag_entry_reference(
-        self,
-        start: tuple[int, int],
-        end: tuple[int, int],
-        duration: float = 0.7,
-        after_sleep: float = 0.0,
-    ) -> None:
-        frame = self.capture_frame()
-        frame_height, frame_width = frame.shape[:2]
-        start_client = (
-            round(frame_width * start[0] / ENTRY_REFERENCE_WIDTH),
-            round(frame_height * start[1] / ENTRY_REFERENCE_HEIGHT),
-        )
-        end_client = (
-            round(frame_width * end[0] / ENTRY_REFERENCE_WIDTH),
-            round(frame_height * end[1] / ENTRY_REFERENCE_HEIGHT),
-        )
-        self.drag_client(start_client, end_client, duration=duration, after_sleep=after_sleep)
-
     def _home_p95_threshold(self) -> float:
         return float(self.config.get("主页压暗阈值", HOME_DIMMED_P95_THRESHOLD_DEFAULT))
-
-    def _ocr_requirements_met(
-        self,
-        entries: list[tuple[str, float]],
-        requirements: list[tuple[str, float]],
-    ) -> bool:
-        combined_text = " ".join(label for label, _confidence in entries)
-        for pattern, min_confidence in requirements:
-            if not self._ocr_requirement_met(entries, combined_text, pattern, min_confidence):
-                return False
-        return True
-
-    def _ocr_requirement_met(
-        self,
-        entries: list[tuple[str, float]],
-        combined_text: str,
-        pattern: str,
-        min_confidence: float,
-    ) -> bool:
-        normalized_pattern = self._normalize_text(pattern)
-        for label, confidence in entries:
-            if re.search(normalized_pattern, self._normalize_text(label), flags=re.IGNORECASE):
-                return confidence >= min_confidence
-
-        if not re.search(
-            normalized_pattern,
-            self._normalize_text(combined_text),
-            flags=re.IGNORECASE,
-        ):
-            return False
-        return any(confidence >= min_confidence for _label, confidence in entries)
 
     @staticmethod
     def _matches_any(text: str, patterns: list[str]) -> bool:
@@ -1700,36 +1512,6 @@ class PVPTask(BaseBD2Task):
     @staticmethod
     def _ocr_pattern_match_count(text: str, patterns: list[str]) -> int:
         return sum(1 for pattern in patterns if PVPTask._matches_any(text, [pattern]))
-
-    @staticmethod
-    def _pvp_label_click_point(
-        boxes,
-        frame_width: int,
-        frame_height: int,
-    ) -> tuple[int, int] | None:
-        candidates = []
-        for box in boxes:
-            if PVPTask._normalize_text(getattr(box, "name", "")) != "pvp":
-                continue
-            x = getattr(box, "x", None)
-            y = getattr(box, "y", None)
-            width = getattr(box, "width", None)
-            height = getattr(box, "height", None)
-            if None in (x, y, width, height):
-                continue
-
-            center_x = int(round(float(x) + float(width) / 2))
-            center_y = int(round(float(y) + float(height) / 2))
-            if center_y < frame_height * 0.50:
-                continue
-            candidates.append((center_x, center_y, float(x)))
-
-        if not candidates:
-            return None
-
-        center_x, center_y, _left = min(candidates, key=lambda item: item[2])
-        click_y = int(round(center_y - frame_height * 0.085))
-        return center_x, max(0, click_y)
 
     _normalize_text = staticmethod(normalize_ocr_text)
 
@@ -1752,8 +1534,6 @@ class PVPTask(BaseBD2Task):
         roi: tuple[int, int, int, int] | None,
     ) -> tuple[int, int, np.ndarray]:
         return reference_roi_frame(frame, roi, (REFERENCE_WIDTH, REFERENCE_HEIGHT))
-
-    _relative_roi_frame = staticmethod(relative_roi_frame)
 
     @staticmethod
     def _crop_reference(frame, roi: tuple[int, int, int, int] | None):

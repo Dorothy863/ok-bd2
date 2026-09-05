@@ -21,6 +21,9 @@ from src.tasks.map_trade.card_status import (
     CollectionCardSelectionResult,
 )
 from src.tasks.map_trade.collector import (
+    Collector,
+)
+from src.tasks.map_trade.collector_constants import (
     ABSORB_ACTION,
     ACTION_FEEDBACK_CHARACTER_RATIO,
     ACTION_FEEDBACK_RELATIVE_ROI,
@@ -41,7 +44,6 @@ from src.tasks.map_trade.collector import (
     SKILL_OCR_UPSCALE,
     SUMMON_ACTION,
     SUPPRESS_ACTION,
-    Collector,
     SearchCountdownSession,
     SkillExecutionResult,
     SkillFeedbackObservation,
@@ -1128,7 +1130,6 @@ class CollectorSkillTest(unittest.TestCase):
 
         for action in (ABSORB_ACTION, SUMMON_ACTION):
             with self.subTest(action=action.name):
-                self.assertIsNone(action.count_roi)
                 self.assertEqual((7, 21), collector._read_count(action, detection))
 
         self.assertEqual(2, len(calls))
@@ -1606,7 +1607,11 @@ class CollectorSkillTest(unittest.TestCase):
                 0.65,
             )
             first = Collector(
-                SimpleNamespace(config={}, info_set=lambda *_args: None),
+                SimpleNamespace(
+                    config={},
+                    info_set=lambda *_args: None,
+                    sleep=lambda *_args: None,
+                ),
                 SimpleNamespace(capture=lambda: frame),
                 SimpleNamespace(),
                 progress,
@@ -1991,7 +1996,11 @@ class CollectorSkillTest(unittest.TestCase):
             )
             clicks = []
             collector = Collector(
-                SimpleNamespace(config={}, info_set=lambda *_args: None),
+                SimpleNamespace(
+                    config={},
+                    info_set=lambda *_args: None,
+                    sleep=lambda *_args: None,
+                ),
                 SimpleNamespace(
                     capture=lambda: frame,
                     click_client=lambda *args, **kwargs: clicks.append((args, kwargs)),
@@ -2040,7 +2049,11 @@ class CollectorSkillTest(unittest.TestCase):
             )
             clicks = []
             collector = Collector(
-                SimpleNamespace(config={}, info_set=lambda *_args: None),
+                SimpleNamespace(
+                    config={},
+                    info_set=lambda *_args: None,
+                    sleep=lambda *_args: None,
+                ),
                 SimpleNamespace(
                     capture=lambda: frame,
                     click_client=lambda *args, **kwargs: clicks.append((args, kwargs)),
@@ -2095,7 +2108,11 @@ class CollectorSkillTest(unittest.TestCase):
             )
             clicks = []
             collector = Collector(
-                SimpleNamespace(config={}, info_set=lambda *_args: None),
+                SimpleNamespace(
+                    config={},
+                    info_set=lambda *_args: None,
+                    sleep=lambda *_args: None,
+                ),
                 SimpleNamespace(
                     capture=lambda: frame,
                     click_client=lambda *args, **kwargs: clicks.append((args, kwargs)),
@@ -2171,7 +2188,11 @@ class CollectorSkillTest(unittest.TestCase):
                 0.95,
             )
             collector = Collector(
-                SimpleNamespace(config={}, info_set=lambda *_args: None),
+                SimpleNamespace(
+                    config={},
+                    info_set=lambda *_args: None,
+                    sleep=lambda *_args: None,
+                ),
                 SimpleNamespace(
                     capture=lambda: frame,
                     click_client=lambda *_args, **_kwargs: (_ for _ in ()).throw(

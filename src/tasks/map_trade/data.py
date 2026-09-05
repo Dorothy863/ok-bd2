@@ -95,7 +95,6 @@ class ShopCartridgeBrightnessCalibration:
     normal_template: str
     unselected_template: str
     foreground_min_gray: int
-    normal_reference_ratio: float
     unselected_reference_ratio: float
     selected_brightness_threshold: float
 
@@ -175,7 +174,6 @@ SHOP_CARTRIDGE_BRIGHTNESS = ShopCartridgeBrightnessCalibration(
     normal_template="shop/cartridges/story_cartridge_01.png",
     unselected_template="shop/cartridges/story_cartridge_01_dimmed.png",
     foreground_min_gray=50,
-    normal_reference_ratio=1.0,
     unselected_reference_ratio=0.50,
     selected_brightness_threshold=0.75,
 )

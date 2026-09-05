@@ -17,11 +17,15 @@ from src.tasks.map_trade.models import (
     ScreenState,
 )
 from src.tasks.map_trade.navigator import (
+    Navigator,
+)
+from src.tasks.map_trade.navigator_constants import (
     AREA_MAP_BACK_TEMPLATE,
     AREA_MAP_OPEN_RELATIVE_POINT,
     AREA_MAP_TELEPORT_BRIGHT_NEUTRAL_RATIO,
     HAND_TEMPLATE,
     QUICK_SWITCH_TEMPLATE,
+    SANDBOX_LARGE_MAP_RETURN_RELATIVE_POINT,
     SANDBOX_MAP_SETTLE_SECONDS,
     SANDBOX_MAP_TELEPORT_TEMPLATE,
     SANDBOX_TELEPORT_SKILL_POLL_INTERVAL,
@@ -31,6 +35,7 @@ from src.tasks.map_trade.navigator import (
     TELEPORT_INTERACTION_CLICK_DELAY,
     TELEPORT_MAP_BACKWARD_TEMPLATE,
     TELEPORT_MAP_FORWARD_TEMPLATE,
+    TELEPORT_MAP_HEADER_OCR_RELATIVE_ROI,
     TELEPORT_MAP_RETURN_RELATIVE_POINT,
     TELEPORT_MAP_SKILL_TEMPLATE,
     TELEPORT_MAP_TELEPORT_CIRCLE_TEMPLATE,
@@ -38,12 +43,7 @@ from src.tasks.map_trade.navigator import (
     TELEPORT_MAP_TITLE_OCR_RELATIVE_ROI,
     TELEPORT_MAP_TRAVEL_SETTLE_SECONDS,
     AreaMapContext,
-    Navigator,
     SandboxConfirmation,
-)
-from src.tasks.map_trade.navigator_constants import (
-    SANDBOX_LARGE_MAP_RETURN_RELATIVE_POINT,
-    TELEPORT_MAP_HEADER_OCR_RELATIVE_ROI,
 )
 from src.tasks.map_trade.vision import Vision
 
@@ -330,52 +330,6 @@ class NavigatorTest(unittest.TestCase):
         self.assertFalse(context.is_area_map)
         self.assertEqual(MapPageMode.SANDBOX_LARGE_MAP, context.map_page_mode)
         self.assertEqual((), context.teleports)
-
-    def test_area_map_scan_skips_unknown_pages_and_confirms_target(self):
-        card = CARD_BY_ID["Q_sp1"]
-        target = card.targets[1]
-        contexts = iter(
-            (
-                self._area_context("额外安全图", left=True, right=True),
-                self._area_context(
-                    target.title,
-                    target.key,
-                    left=True,
-                    right=True,
-                ),
-            )
-        )
-        navigator = Navigator(SimpleNamespace(), SimpleNamespace())
-        navigator._move_area_map = lambda *_args: next(contexts)
-
-        located, moved, reason = navigator._locate_collection_target(
-            card,
-            target,
-            self._area_context("主城区外页", right=True),
-        )
-
-        self.assertTrue(moved)
-        self.assertEqual("", reason)
-        self.assertEqual(target.key, located.resolved_target_key)
-
-    def test_area_map_scan_stops_on_ambiguous_target_title(self):
-        card = CARD_BY_ID["Q_sp1"]
-        target = card.targets[1]
-        ambiguous = self._area_context(
-            "标题歧义",
-            right=True,
-            candidate_keys=(
-                CollectionMapRole.BATTLE_AREA_1.value,
-                CollectionMapRole.BATTLE_AREA_2.value,
-            ),
-        )
-        navigator = Navigator(SimpleNamespace(), SimpleNamespace())
-
-        located, moved, reason = navigator._locate_collection_target(card, target, ambiguous)
-
-        self.assertIsNone(located)
-        self.assertFalse(moved)
-        self.assertIn("多个目标", reason)
 
     def test_area_map_back_template_uses_scoped_finite_scale_matching(self):
         self.assertEqual("image/green/BackButGe.png", AREA_MAP_BACK_TEMPLATE.file_name)

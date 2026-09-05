@@ -6,11 +6,10 @@ import numpy as np
 from src.tasks.FreeGachaTask import (
     BACK_PAGE_KEYWORDS,
     LOADING_TEMPLATE,
-    REFERENCE_HEIGHT,
-    REFERENCE_WIDTH,
     FreeGachaTask,
 )
 from src.tasks.map_trade.models import MatchResult
+from src.tasks.task_vision_mixin import REFERENCE_HEIGHT, REFERENCE_WIDTH
 
 free_gacha_module = importlib.import_module("src.tasks.FreeGachaTask")
 

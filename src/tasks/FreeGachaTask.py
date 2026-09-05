@@ -1,24 +1,11 @@
-from pathlib import Path
 from time import monotonic
 
-import cv2
-import numpy as np
 from qfluentwidgets import FluentIcon
 
 from src.tasks.BaseBD2Task import BaseBD2Task
-from src.tasks.map_trade.models import MatchResult, TemplateSpec
-from src.tasks.task_vision_mixin import TaskVisionMixin
-from src.utils import task_vision
-from src.utils.calibration import FHD_1080
-from src.utils.image_utils import (
-    to_gray,
-)
-from src.utils.ocr_utils import fuzzy_substring_match, keyword_match_count, normalize_ocr_text
+from src.tasks.task_vision_mixin import LOADING_TEMPLATE, TaskVisionMixin
+from src.utils.ocr_utils import keyword_match_count
 
-REFERENCE_WIDTH = FHD_1080.width
-REFERENCE_HEIGHT = FHD_1080.height
-PROJECT_ROOT = Path(__file__).resolve().parents[2]
-TEMPLATE_DIR = PROJECT_ROOT / "recognition-assets" / "template-assets"
 KEYWORD_MATCH_RATIO = 0.9
 
 
@@ -34,15 +21,11 @@ class FreeGachaTask(TaskVisionMixin, BaseBD2Task):
         self.group_name = "日常/周常"
         self.group_icon = FluentIcon.CALENDAR
         self.visible = True
-        self._templates: dict[str, np.ndarray] = {}
-        self._missing_template_names: set[str] = set()
-        self._match_error_names: set[str] = set()
-        self._match_pause_until = 0.0
+        self._init_vision_state()
         self.default_config.update(
             {
                 "启用": True,
                 "加载页面阈值": 0.72,
-                "返回按钮阈值": 0.76,
                 "主页压暗阈值": 185.0,
                 "抽卡 OCR 阈值": 0.2,
                 "loading 出现等待秒数": 6.0,
@@ -367,27 +350,6 @@ class FreeGachaTask(TaskVisionMixin, BaseBD2Task):
             interval=max(0.05, float(self.config.get("结果页 OCR 间隔秒数", 0.1))),
         )
 
-    def _wait_for_template(
-        self,
-        spec: TemplateSpec,
-        timeout: float,
-        name: str,
-        interval: float = 0.35,
-    ) -> bool:
-        end_at = monotonic() + max(0.0, timeout)
-        last_score = -1.0
-        while monotonic() <= end_at:
-            frame = self.capture_frame()
-            result = self._match(frame, spec)
-            last_score = result.score
-            self.info_set(name, f"{result.score:.3f}")
-            if self._passes(result, spec):
-                return True
-            self.sleep(interval)
-
-        self.info_set(name, f"{last_score:.3f}")
-        return False
-
     def _wait_for_ocr_keywords(
         self,
         keywords: list[str],
@@ -430,41 +392,6 @@ class FreeGachaTask(TaskVisionMixin, BaseBD2Task):
         )
         return confirmed
 
-    def _match(self, frame, spec: TemplateSpec) -> MatchResult:
-        empty = MatchResult(-1.0, (0, 0), (0, 0))
-        if monotonic() < self._match_pause_until:
-            return empty
-
-        try:
-            return task_vision.match_template(
-                frame,
-                spec,
-                self.config,
-                TEMPLATE_DIR,
-                cache=self._templates,
-                min_size=8,
-                loader=lambda _template_dir, spec: (self._load_template(spec), None),
-            )
-        except RuntimeError as exc:
-            if spec.name not in self._missing_template_names:
-                self._missing_template_names.add(spec.name)
-                self.log_warning(str(exc), notify=True)
-            return empty
-        except (cv2.error, MemoryError) as exc:
-            self._match_pause_until = monotonic() + 2.0
-            message = f"图像匹配内存不足，暂停识别2秒：{spec.name}"
-            self.info_set("匹配错误", message)
-            if spec.name not in self._match_error_names:
-                self._match_error_names.add(spec.name)
-                self.log_warning(f"{message}；{exc}", notify=True)
-            return empty
-
-    def _load_template(self, spec: TemplateSpec) -> np.ndarray:
-        return task_vision.load_template(TEMPLATE_DIR, spec, cache=self._templates)[0]
-
-    def _passes(self, result: MatchResult, spec: TemplateSpec) -> bool:
-        return task_vision.passes_match(result, spec, self.config)
-
     def _ocr_text(self, frame, name: str) -> str:
         try:
             boxes = self.ocr(
@@ -480,42 +407,9 @@ class FreeGachaTask(TaskVisionMixin, BaseBD2Task):
 
         return " ".join(box.name for box in boxes if getattr(box, "name", ""))
 
-    def _click_reference(self, x: int, y: int, after_sleep: float = 0.0):
-        self.operate_click(
-            max(0.0, min(1.0, x / REFERENCE_WIDTH)),
-            max(0.0, min(1.0, y / REFERENCE_HEIGHT)),
-            after_sleep=after_sleep,
-        )
-
     @staticmethod
     def _keyword_match_count(text: str, keywords: list[str]) -> int:
         return keyword_match_count(text, keywords, fuzzy_ratio=KEYWORD_MATCH_RATIO)
-
-    @staticmethod
-    def _keyword_matches(normalized_text: str, normalized_keyword: str) -> bool:
-        return fuzzy_substring_match(
-            normalized_text,
-            normalized_keyword,
-            KEYWORD_MATCH_RATIO,
-        )
-
-    _normalize_text = staticmethod(normalize_ocr_text)
-    _to_gray = staticmethod(to_gray)
-
-
-LOADING_TEMPLATE = TemplateSpec(
-    name="ui_loading_black",
-    file_name="image/UI_loading_black.png",
-    threshold_key="加载页面阈值",
-    default_threshold=0.72,
-)
-
-BACK_TEMPLATE = TemplateSpec(
-    name="back",
-    file_name="back.png",
-    threshold_key="返回按钮阈值",
-    default_threshold=0.76,
-)
 
 GACHA_PAGE_KEYWORDS = [
     "服装抽抽乐",

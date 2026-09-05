@@ -1024,57 +1024,6 @@ class Vision:
         region_mean = float(np.mean(sample_gray[active]))
         return region_mean / template_mean if template_mean > 0 else 0.0
 
-    def find_all(
-        self,
-        frame: np.ndarray,
-        spec: TemplateSpec,
-        threshold: float | None = None,
-        max_results: int = 30,
-    ) -> list[MatchResult]:
-        template, mask = self._load(spec)
-        gray = self._gray(frame)
-        frame_height, frame_width = gray.shape[:2]
-        left = top = 0
-        search = gray
-        if spec.roi is not None:
-            left, top, width, height = self.reference_roi(spec.roi, frame_width, frame_height)
-            search = gray[top : top + height, left : left + width]
-        scale = offline_template_scale(
-            spec.file_name,
-            frame_width,
-            frame_height,
-            reference_scale=spec.reference_scale,
-        )
-        scaled = self._resize_template(template, scale)
-        scaled_mask = self._resize_mask(mask, scale)
-        height, width = scaled.shape[:2]
-        if search.size == 0 or height > search.shape[0] or width > search.shape[1]:
-            return []
-        result = template_match_response(search, scaled, scaled_mask)
-        wanted = self.threshold_for(spec) if threshold is None else threshold
-        candidates = independent_pixel_valid_matches(
-            result,
-            search,
-            scaled,
-            scaled_mask,
-            template_threshold=wanted,
-            pixel_threshold=(spec.min_pixel_score or 0.0),
-            zncc_threshold=spec.min_zncc_score,
-            suppression_radius=(round(width * 0.65), round(height * 0.65)),
-            max_matches=max_results,
-        )
-        matches = [
-            MatchResult(
-                candidate.score,
-                (left + candidate.location[0], top + candidate.location[1]),
-                (width, height),
-                pixel_score=candidate.pixel_score,
-                zncc_score=float(getattr(candidate, "zncc_score", -1.0)),
-            )
-            for candidate in candidates
-        ]
-        return matches
-
     def wait_template(
         self, spec: TemplateSpec, timeout: float, interval: float = 0.4
     ) -> MatchResult | None:
@@ -1278,24 +1227,6 @@ class Vision:
         text = " ".join(value for value in values if value)
         self._status(f"{name} OCR", text or "-")
         return text
-
-    def wait_ocr(
-        self,
-        patterns: Iterable[str],
-        timeout: float,
-        name: str,
-        roi: tuple[int, int, int, int] | None = None,
-        interval: float = 0.5,
-    ) -> str | None:
-        compiled = [re.compile(pattern, re.IGNORECASE) for pattern in patterns]
-        end_at = monotonic() + max(0.0, timeout)
-        while monotonic() <= end_at:
-            text = self.ocr_text(self.capture(), name, roi)
-            normalized = self.simplify(text)
-            if any(pattern.search(normalized) for pattern in compiled):
-                return text
-            self.task.sleep(interval)
-        return None
 
     def click_ocr(
         self,
