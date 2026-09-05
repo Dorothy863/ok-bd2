@@ -17,7 +17,7 @@ from src.tasks.map_trade.action_icons import (
 )
 from src.tasks.map_trade.card_status import StoryCardCompletion
 from src.tasks.map_trade.models import CardSpec, MapPageMode, MatchResult, TemplateSpec
-from src.utils.calibration import FHD_1080, reference_rect_to_relative_roi
+from src.utils.calibration import FHD_1080, HD_720, reference_rect_to_relative_roi
 from src.utils.cartridge_quick_switch import QUICK_SWITCH_PAGE_LABELS
 from src.utils.vision_models import FrameGeometry
 
@@ -416,14 +416,24 @@ SANDBOX_NAVIGATION_PIN_TEMPLATE = TemplateSpec(
     "箱庭小地图图钉",
     "image/pin.png",
     0.72,
-    candidate_center_roi=(100 / 1280, 70 / 720, 210 / 1280, 180 / 720),
+    candidate_center_roi=(
+        100 / HD_720.width,
+        70 / HD_720.height,
+        210 / HD_720.width,
+        180 / HD_720.height,
+    ),
 )
 SANDBOX_NAVIGATION_RUN_TEMPLATE = TemplateSpec(
     "箱庭小地图自动移动",
     "image/green/Run.png",
     0.72,
     green_mask=True,
-    candidate_center_roi=(100 / 1280, 70 / 720, 210 / 1280, 180 / 720),
+    candidate_center_roi=(
+        100 / HD_720.width,
+        70 / HD_720.height,
+        210 / HD_720.width,
+        180 / HD_720.height,
+    ),
 )
 SANDBOX_NAVIGATION_OPEN_TEMPLATES = (
     SANDBOX_NAVIGATION_PIN_TEMPLATE,
