@@ -345,6 +345,11 @@ class TaskVisionMixin:
             )
             self.info_set(f"{name} 抽抽乐 OCR", last_gacha_text or "-")
             if confirmed:
+                # 返回主页/确认主页后，转场动画仍在进行，立刻点击会被吞
+                # （BUG-20260905：小屋/收菜入口点击被吞）。确认后再稳定等待几秒。
+                settle = float(self.config.get("主页确认后稳定等待秒数", 6.0))
+                if settle > 0:
+                    self.sleep(settle)
                 return True
             self.clear_temporary_home_announcement_if_needed(
                 left_hits=last_left_hits,
