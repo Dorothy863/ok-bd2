@@ -46,25 +46,40 @@ HD720_REFERENCE_WIDTH = HD_720.width
 HD720_REFERENCE_HEIGHT = HD_720.height
 ENTRY_REFERENCE_WIDTH = QHD_1440.width
 ENTRY_REFERENCE_HEIGHT = QHD_1440.height
-FREE_AP_SWITCH_SCREEN_ROI = (1680, 535, 120, 55)
-PVP_RESULT_SCREEN_ROI = (932, 368, 699, 704)
-PVP_RESULT_CLOSE_SCREEN_POINT = (1585, 410)
-PVP_FAILURE_LEAVE_REFERENCE_ROI = (696, 952, 535, 87)
-PVP_SUCCESS_LEAVE_REFERENCE_ROI = (1594, 987, 240, 66)
+# 参考系约定：*_SCREEN_* 常量与 *_CLICK_REFERENCE 由 _click_screen_reference /
+# _screen_reference_* 按 2560×1440（QHD_1440）归一；带 OCR_REFERENCE_ROI 且经
+# _mf_roi 消费的常量是 1280×720（HD_720）参考；其余 *_REFERENCE_* 为 1920×1080。
+FREE_AP_SWITCH_SCREEN_ROI = (1680, 535, 120, 55)  # 2560×1440 参考
+PVP_RESULT_SCREEN_ROI = (932, 368, 699, 704)  # 2560×1440 参考
+PVP_RESULT_CLOSE_SCREEN_POINT = (1585, 410)  # 2560×1440 参考
+PVP_FAILURE_LEAVE_REFERENCE_ROI = (696, 952, 535, 87)  # 1920×1080 参考
+PVP_SUCCESS_LEAVE_REFERENCE_ROI = (1594, 987, 240, 66)  # 1920×1080 参考
 # The PVP hub uses the same top-right sandbox home entry as the validated
 # chapter-sandbox calibration.  The old (100, 54) point hovered the applied-
 # effects status icon instead of leaving the hub.
-PVP_BACK_HOME_REFERENCE_POINT = (1797, 63)
-PVP_HUB_NOTICE_SCREEN_ROI = (1381, 865, 62, 45)
+PVP_BACK_HOME_REFERENCE_POINT = (1797, 63)  # 1920×1080 参考
+PVP_HUB_NOTICE_SCREEN_ROI = (1381, 865, 62, 45)  # 2560×1440 参考
 PVP_CARTRIDGE_SLOT_POINT = (152 / REFERENCE_WIDTH, 970 / REFERENCE_HEIGHT)
 PVP_AUTO_BATTLE_SCREEN_ROI = (1470, 910, 170, 150)
 # Reference ROI for the multiplier value in the main auto-battle popup. The value
 # sits directly left of the settings gear (reference x ≈ 868 at 1280x720); the ROI
 # must exclude the gear, otherwise the OCR det box merges it into the value and the
 # anchored ^N$ match fails on artifacts such as "1倍a".
-PVP_MULTIPLIER_OCR_REFERENCE_ROI = (800, 213, 65, 33)
-PVP_AUTO_BATTLE_CLICK_REFERENCE = (2026, 1291)
-PVP_STAGE_CLICK_REFERENCE_OFFSET = (0, -75)
+PVP_MULTIPLIER_OCR_REFERENCE_ROI = (800, 213, 65, 33)  # 1280×720 参考
+PVP_AUTO_BATTLE_CLICK_REFERENCE = (2026, 1291)  # 2560×1440 参考
+PVP_STAGE_CLICK_REFERENCE_OFFSET = (0, -75)  # 1920×1080 参考位移
+PVP_BATTLE_START_SCREEN_POINT = (1381, 1061)  # 2560×1440 参考
+PVP_FREE_AP_SWITCH_SCREEN_POINT = (1732, 557)  # 2560×1440 参考
+PVP_MULTIPLIER_BUTTON_SCREEN_POINT = (1719, 465)  # 2560×1440 参考
+PVP_MULTIPLIER_40_OPTION_SCREEN_POINT = (1584, 715)  # 2560×1440 参考
+PVP_MULTIPLIER_1_OPTION_SCREEN_POINT = (980, 712)  # 2560×1440 参考
+PVP_MULTIPLIER_PLUS_SCREEN_POINT = (1657, 850)  # 2560×1440 参考
+PVP_MULTIPLIER_CONFIRM_SCREEN_POINT = (1383, 1007)  # 2560×1440 参考
+PVP_MAX_BATTLE_COUNT_SCREEN_POINT = (1650, 850)  # 2560×1440 参考
+PVP_AUTO_BATTLE_MENU_OCR_REFERENCE_ROI = (327, 165, 417, 156)  # 1280×720 参考
+PVP_BATTLE_ONGOING_OCR_REFERENCE_ROI = (50, 576, 203, 69)  # 1280×720 参考
+PVP_MULTIPLIER_SETTING_OCR_REFERENCE_ROI = (451, 101, 379, 184)  # 1280×720 参考
+PVP_MULTIPLIER_SETTING_VALUE_OCR_REFERENCE_ROI = (596, 372, 105, 50)  # 1280×720 参考
 PVP_RESULT_BASE_MINUTES = 20.0
 PVP_RESULT_CLOSE_AFTER_SECONDS = 1.5
 PVP_BATTLE_ONGOING_PATTERN = r"正在进行"
@@ -535,7 +550,7 @@ class PVPTask(BaseBD2Task):
             self._save_flow_diagnostic("pvp_auto_battle_failed")
             return "failed"
 
-        menu_roi = self._mf_roi(327, 165, 417, 156)
+        menu_roi = self._mf_roi(*PVP_AUTO_BATTLE_MENU_OCR_REFERENCE_ROI)
         # 2026-09 客户端改版把按钮热区收到图标/背板上（RPT-20260905-201103），
         # OCR 标签中心点击不再打开弹窗；先点校准图标位，未验证到弹窗再兜底标签中心。
         found_menu = False
@@ -585,7 +600,7 @@ class PVPTask(BaseBD2Task):
 
         self.info_set("当前阶段", "点击战斗开始")
         self.info_set("PVP 开始战斗 OCR", "跳过前置 OCR，按固定比例点击")
-        self._click_screen_reference(1381, 1061, after_sleep=2.0)
+        self._click_screen_reference(*PVP_BATTLE_START_SCREEN_POINT, after_sleep=2.0)
         return self._wait_battle_start_or_ap_shortage(multiplier)
 
     def _wait_battle_start_or_ap_shortage(self, multiplier: int) -> str:
@@ -597,7 +612,7 @@ class PVPTask(BaseBD2Task):
                 battle_text = self._ocr_text(
                     frame,
                     name="PVP 战斗中",
-                    roi=self._mf_roi(50, 576, 203, 69),
+                    roi=self._mf_roi(*PVP_BATTLE_ONGOING_OCR_REFERENCE_ROI),
                 )
                 if self._matches_any(battle_text, [PVP_BATTLE_ONGOING_PATTERN]):
                     self.info_set("PVP 战斗中 OCR", battle_text)
@@ -624,7 +639,7 @@ class PVPTask(BaseBD2Task):
             self.info_set("PVP 免费AP", "已开启")
             return True
 
-        self._click_screen_reference(1732, 557, after_sleep=1.0)
+        self._click_screen_reference(*PVP_FREE_AP_SWITCH_SCREEN_POINT, after_sleep=1.0)
         if self._free_ap_switch_on():
             self.info_set("PVP 免费AP", "已开启")
             return True
@@ -655,38 +670,38 @@ class PVPTask(BaseBD2Task):
         if self._multiplier_matches(multiplier):
             return True
 
-        self._click_screen_reference(1719, 465, after_sleep=0.8)
+        self._click_screen_reference(*PVP_MULTIPLIER_BUTTON_SCREEN_POINT, after_sleep=0.8)
         if not self._wait_for_ocr_patterns(
             [r"设置.*鲜血鸡尾酒.*消耗量|鲜血鸡尾酒.*消耗量"],
             timeout=8.0,
             name="PVP 倍率设置",
-            roi=self._mf_roi(451, 101, 379, 184),
+            roi=self._mf_roi(*PVP_MULTIPLIER_SETTING_OCR_REFERENCE_ROI),
         )[0]:
             self.log_info("镜中之战：未能打开倍率设置。")
             return False
 
         if multiplier == 40:
-            self._click_screen_reference(1584, 715, after_sleep=0.5)
+            self._click_screen_reference(*PVP_MULTIPLIER_40_OPTION_SCREEN_POINT, after_sleep=0.5)
         else:
-            self._click_screen_reference(980, 712, after_sleep=0.5)
+            self._click_screen_reference(*PVP_MULTIPLIER_1_OPTION_SCREEN_POINT, after_sleep=0.5)
 
         for _ in range(10):
             if self._setting_multiplier_matches(multiplier):
                 break
             if multiplier == 1:
                 break
-            self._click_screen_reference(1657, 850, after_sleep=0.5)
+            self._click_screen_reference(*PVP_MULTIPLIER_PLUS_SCREEN_POINT, after_sleep=0.5)
 
         if not self._setting_multiplier_matches(multiplier):
             self.info_set("PVP 倍率 OCR", "未确认")
             return False
 
-        self._click_screen_reference(1383, 1007, after_sleep=1.0)
+        self._click_screen_reference(*PVP_MULTIPLIER_CONFIRM_SCREEN_POINT, after_sleep=1.0)
         return self._multiplier_matches(multiplier, timeout=4.0)
 
     def _select_max_battle_count(self) -> None:
         self.info_set("当前阶段", "选择最大战斗次数")
-        self._click_screen_reference(1650, 850, after_sleep=0.8)
+        self._click_screen_reference(*PVP_MAX_BATTLE_COUNT_SCREEN_POINT, after_sleep=0.8)
 
     def _multiplier_matches(self, multiplier: int, timeout: float = 2.0) -> bool:
         found, text = self._wait_for_ocr_patterns(
@@ -704,7 +719,7 @@ class PVPTask(BaseBD2Task):
             [rf"^{multiplier}$", rf"^{multiplier}倍$"],
             timeout=0.8,
             name="PVP 倍率设置值",
-            roi=self._mf_roi(596, 372, 105, 50),
+            roi=self._mf_roi(*PVP_MULTIPLIER_SETTING_VALUE_OCR_REFERENCE_ROI),
             normalize_multiplier=True,
         )
         self.info_set("PVP 倍率 OCR", text or "-")
@@ -720,7 +735,11 @@ class PVPTask(BaseBD2Task):
             name="PVP 结算",
             roi=self._screen_reference_roi_to_reference_roi(PVP_RESULT_SCREEN_ROI),
             extra_wait_patterns=[
-                (PVP_BATTLE_ONGOING_PATTERN, self._mf_roi(50, 576, 203, 69), "PVP 战斗中 OCR")
+                (
+                    PVP_BATTLE_ONGOING_PATTERN,
+                    self._mf_roi(*PVP_BATTLE_ONGOING_OCR_REFERENCE_ROI),
+                    "PVP 战斗中 OCR",
+                )
             ],
         )
         self.info_set("PVP 结算 OCR", result_text or "-")

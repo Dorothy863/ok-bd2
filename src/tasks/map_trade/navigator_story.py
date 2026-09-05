@@ -88,6 +88,11 @@ from src.tasks.map_trade.navigator_constants import (
     StoryBadgeGrid,
 )
 from src.tasks.map_trade.vision import normalize_text
+from src.utils.calibration import FHD_1080
+
+# 从箱庭点击快速切换按钮的统一识别窗口与点击后停顿。
+QUICK_SWITCH_CLICK_TIMEOUT = 10.0
+QUICK_SWITCH_CLICK_AFTER_SLEEP = 1.0
 
 
 class StoryCardNavigationMixin:
@@ -103,8 +108,8 @@ class StoryCardNavigationMixin:
             ensure_home=self._wait_for_cartridge_home,
             click_quick_switch=lambda: self.vision.click_stable_template(
                 QUICK_SWITCH_TEMPLATE,
-                timeout=10.0,
-                after_sleep=1.0,
+                timeout=QUICK_SWITCH_CLICK_TIMEOUT,
+                after_sleep=QUICK_SWITCH_CLICK_AFTER_SLEEP,
             ),
             confirm_quick_switch_page=self._wait_for_quick_switch_page,
         )
@@ -251,7 +256,7 @@ class StoryCardNavigationMixin:
         client_scale = (
             geometry.client_scale
             if geometry is not None
-            else min(width / 1920, height / 1080)
+            else min(width / FHD_1080.width, height / FHD_1080.height)
         )
         peak_radius = max(2, round(5 * client_scale))
         cluster_radius = max(4, round(STORY_BADGE_CLUSTER_RADIUS * client_scale))
@@ -561,7 +566,7 @@ class StoryCardNavigationMixin:
         client_scale = (
             geometry.client_scale
             if geometry is not None
-            else min(width / 1920, height / 1080)
+            else min(width / FHD_1080.width, height / FHD_1080.height)
         )
         peak_radius = max(2, round(5 * client_scale))
         local_tolerance = max(
@@ -1834,8 +1839,8 @@ class StoryCardNavigationMixin:
         self._status("导航状态", "从卡带箱庭识别快速切换按钮")
         if not self.vision.click_stable_template(
             QUICK_SWITCH_TEMPLATE,
-            timeout=10.0,
-            after_sleep=1.0,
+            timeout=QUICK_SWITCH_CLICK_TIMEOUT,
+            after_sleep=QUICK_SWITCH_CLICK_AFTER_SLEEP,
         ):
             return NavigationResult(
                 False,

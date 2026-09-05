@@ -34,6 +34,9 @@ from src.tasks.map_trade.trader_constants import (
 )
 from src.tasks.map_trade.vision import normalize_text
 
+# 点击"购买全部收藏"后等待确认弹窗出现前的停顿。
+BUY_ALL_FAVORITES_CLICK_AFTER_SLEEP = 0.3
+
 
 class BuyFlowMixin:
     def run_buy(self) -> bool:
@@ -138,7 +141,9 @@ class BuyFlowMixin:
             "一键购买全部收藏按钮点击中心",
             f"center=({button_center[0]},{button_center[1]})",
         )
-        self.vision.click_client(button_center, frame.shape, after_sleep=0.3)
+        self.vision.click_client(
+            button_center, frame.shape, after_sleep=BUY_ALL_FAVORITES_CLICK_AFTER_SLEEP
+        )
         if not self._wait_for_purchase_confirmation():
             self.task.log_warning(
                 "买：点击一键购买全部收藏后，未同时识别到确认标题和询问文字。"

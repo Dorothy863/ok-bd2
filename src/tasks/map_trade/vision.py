@@ -17,6 +17,7 @@ from src.tasks.map_trade.models import (
     TemplateSpec,
 )
 from src.utils import task_vision
+from src.utils.calibration import FHD_1080
 from src.utils.image_utils import (
     candidate_scales,
     independent_match_candidates,
@@ -45,8 +46,8 @@ COUNT_PATTERN = re.compile(r"(?<!\d)(\d+)\s*[/：:|\-~]\s*(\d+)(?!\d)")
 # New evidence matching uses the FHD template calibration.  Keep
 # ``reference_point``/``reference_roi`` on the historical HD calibration for
 # callers that still pass their explicit 1280x720 reference coordinates.
-FRAME_REFERENCE_WIDTH = 1920
-FRAME_REFERENCE_HEIGHT = 1080
+FRAME_REFERENCE_WIDTH = FHD_1080.width
+FRAME_REFERENCE_HEIGHT = FHD_1080.height
 FRAME_EXPECTED_ASPECT = 16 / 9
 FRAME_MINIMUM_WIDTH = 960
 FRAME_MINIMUM_HEIGHT = 540
@@ -56,6 +57,22 @@ FRAME_DARK_BORDER_MAX_STD = 8.0
 FRAME_DARK_BORDER_MIN_FRACTION = 0.995
 FRAME_DARK_BORDER_MIN_PIXELS = 8
 FRAME_DARK_BORDER_MIN_FRACTION_OF_AXIS = 0.01
+# template_color_ratios 的 BGR 通道门槛：主通道需比其他通道高出的最小差值、
+# 主通道最低亮度、以及判定"中性色"允许的最大通道间极差。
+COLOR_CHANNEL_DOMINANCE_MARGIN = 8
+COLOR_CHANNEL_MINIMUM = 60
+NEUTRAL_CHANNEL_SPREAD_MAXIMUM = 10
+# template_hsv_color_ratios 的 HSV 门槛（OpenCV H 0-179 / S、V 0-255）。
+HSV_YELLOW_HUE_MINIMUM = 8
+HSV_YELLOW_HUE_MAXIMUM = 38
+HSV_YELLOW_SATURATION_MINIMUM = 60
+HSV_YELLOW_VALUE_MINIMUM = 75
+HSV_NEUTRAL_SATURATION_MAXIMUM = 55
+HSV_NEUTRAL_VALUE_MINIMUM = 50
+HSV_BRIGHT_VALUE_MINIMUM = 130
+# star_is_yellow 的灰星/彩星区分门槛：饱和度超阈像素占比达到下限才判为黄色。
+STAR_YELLOW_SATURATION_MINIMUM = 77
+STAR_YELLOW_SATURATION_RATIO_MINIMUM = 0.15
 # A compact replay fixture may intentionally retain only a few UI ROIs and
 # leave the rest black.  Treating that sparse diagnostic background as
 # letterboxing would suppress the recognizer before it can inspect the ROIs.
@@ -899,15 +916,15 @@ class Vision:
         pixels = color[active].astype(np.int16)
         blue, green, red = pixels.T
         green_pixels = (
-            (green - np.maximum(blue, red) >= 8)
-            & (green >= 60)
+            (green - np.maximum(blue, red) >= COLOR_CHANNEL_DOMINANCE_MARGIN)
+            & (green >= COLOR_CHANNEL_MINIMUM)
         )
         red_pixels = (
-            (red - np.maximum(blue, green) >= 8)
-            & (red >= 60)
+            (red - np.maximum(blue, green) >= COLOR_CHANNEL_DOMINANCE_MARGIN)
+            & (red >= COLOR_CHANNEL_MINIMUM)
         )
         neutral_pixels = (
-            np.max(pixels, axis=1) - np.min(pixels, axis=1) <= 10
+            np.max(pixels, axis=1) - np.min(pixels, axis=1) <= NEUTRAL_CHANNEL_SPREAD_MAXIMUM
         )
         return (
             float(np.mean(green_pixels)),
@@ -959,13 +976,15 @@ class Vision:
         hsv = cv2.cvtColor(color, cv2.COLOR_BGR2HSV)
         hue, saturation, value = hsv[active].T
         yellow = (
-            (hue >= 8)
-            & (hue <= 38)
-            & (saturation >= 60)
-            & (value >= 75)
+            (hue >= HSV_YELLOW_HUE_MINIMUM)
+            & (hue <= HSV_YELLOW_HUE_MAXIMUM)
+            & (saturation >= HSV_YELLOW_SATURATION_MINIMUM)
+            & (value >= HSV_YELLOW_VALUE_MINIMUM)
         )
-        neutral = (saturation <= 55) & (value >= 50)
-        bright = value >= 130
+        neutral = (saturation <= HSV_NEUTRAL_SATURATION_MAXIMUM) & (
+            value >= HSV_NEUTRAL_VALUE_MINIMUM
+        )
+        bright = value >= HSV_BRIGHT_VALUE_MINIMUM
         return (
             float(np.mean(yellow)),
             float(np.mean(neutral)),
@@ -1266,8 +1285,11 @@ class Vision:
         if crop.shape[2] == 4:
             crop = crop[:, :, :3]
         hsv = cv2.cvtColor(crop, cv2.COLOR_BGR2HSV)
-        saturation_ratio = float(np.count_nonzero(hsv[:, :, 1] > 77)) / hsv[:, :, 1].size
-        return saturation_ratio >= 0.15
+        saturation_ratio = (
+            float(np.count_nonzero(hsv[:, :, 1] > STAR_YELLOW_SATURATION_MINIMUM))
+            / hsv[:, :, 1].size
+        )
+        return saturation_ratio >= STAR_YELLOW_SATURATION_RATIO_MINIMUM
 
     def _status(self, key: str, value) -> None:
         try:

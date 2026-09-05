@@ -99,6 +99,7 @@ from src.tasks.map_trade.navigator_constants import (
     SandboxConfirmation,
 )
 from src.tasks.map_trade.vision import normalize_text
+from src.utils.calibration import FHD_1080
 
 
 class SandboxNavigationMixin:
@@ -1615,7 +1616,10 @@ class SandboxNavigationMixin:
         height, width = frame.shape[:2]
         cluster_radius = max(
             6,
-            round(AREA_MAP_TELEPORT_CLUSTER_RADIUS * min(width / 1920, height / 1080)),
+            round(
+                AREA_MAP_TELEPORT_CLUSTER_RADIUS
+                * min(width / FHD_1080.width, height / FHD_1080.height)
+            ),
         )
         candidates: list[MatchResult] = []
         for spec in templates:

@@ -52,7 +52,12 @@ from src.tasks.map_trade.trader_constants import (
     SaleItemCandidate,
 )
 from src.tasks.map_trade.vision import normalize_text
+from src.utils.calibration import FHD_1080
 from src.utils.image_utils import to_gray
+
+# 等待单个日历条目全部可售卡片 OCR 确认的总时长与轮询间隔。
+SALE_ITEM_CANDIDATES_WAIT_TIMEOUT = 8.0
+SALE_ITEM_CANDIDATES_POLL_INTERVAL = 0.5
 
 
 class SellFlowMixin:
@@ -386,8 +391,8 @@ class SellFlowMixin:
     def _wait_sale_item_candidates(
         self,
         entry: CalendarEntry,
-        timeout: float = 8.0,
-        interval: float = 0.5,
+        timeout: float = SALE_ITEM_CANDIDATES_WAIT_TIMEOUT,
+        interval: float = SALE_ITEM_CANDIDATES_POLL_INTERVAL,
     ) -> tuple[list[SaleItemCandidate], np.ndarray] | None:
         """Wait for all OCR-confirmed sale cards for one calendar entry."""
 
@@ -441,8 +446,8 @@ class SellFlowMixin:
             return None
         x, y, width, height = geometry
         frame_height, frame_width = frame_shape[:2]
-        scale_x = frame_width / 1920.0
-        scale_y = frame_height / 1080.0
+        scale_x = frame_width / FHD_1080.width
+        scale_y = frame_height / FHD_1080.height
         search_width = round(SALE_MARKER_SEARCH_WIDTH * scale_x)
         padding = round(SALE_MARKER_VERTICAL_PADDING * scale_y)
         left = max(0, round(x) - search_width)

@@ -27,6 +27,9 @@ from src.tasks.map_trade.navigator import Navigator
 from src.tasks.map_trade.progress import ProgressStore
 from src.tasks.map_trade.vision import Vision
 
+# "卡带单步重试次数"未配置时的默认值。
+CARD_RETRY_DEFAULT = 2
+
 
 class Collector(SkillExecutionMixin):
     def __init__(
@@ -77,7 +80,9 @@ class Collector(SkillExecutionMixin):
             )
 
         completed_this_run = 0
-        card_retries = max(1, int(self.task.config.get("卡带单步重试次数", 2)))
+        card_retries = max(
+            1, int(self.task.config.get("卡带单步重试次数", CARD_RETRY_DEFAULT))
+        )
         for card in COLLECTABLE_CARDS:
             if card.number in UNSUPPORTED_COLLECTION_CARD_NUMBERS:
                 self._status("跳过", f"{card.card_id}：第14章等待专用流程")

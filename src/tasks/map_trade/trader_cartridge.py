@@ -52,6 +52,11 @@ from src.tasks.map_trade.trader_constants import (
     ShopCartridgeTemplateCandidate,
 )
 from src.tasks.map_trade.vision import normalize_text
+from src.utils.calibration import FHD_1080
+
+# 点击商店卡带后等待其变为选中态的窗口与轮询间隔。
+SHOP_CARTRIDGE_SELECT_CONFIRM_TIMEOUT = 4.0
+SHOP_CARTRIDGE_SELECT_POLL_INTERVAL = 0.25
 
 
 class ShopCartridgeNavigationMixin:
@@ -278,8 +283,8 @@ class ShopCartridgeNavigationMixin:
         frame: np.ndarray,
     ) -> tuple[ShopCartridgeOcrRow, ...]:
         height, width = frame.shape[:2]
-        scale_x = width / 1920
-        scale_y = height / 1080
+        scale_x = width / FHD_1080.width
+        scale_y = height / FHD_1080.height
         texts: list[ShopCartridgeOcrText] = []
         for box in self.vision.ocr_boxes(
             frame,
@@ -357,7 +362,7 @@ class ShopCartridgeNavigationMixin:
         frame: np.ndarray,
     ) -> tuple[ShopCartridgeTemplateCandidate, ...]:
         height, width = frame.shape[:2]
-        peak_radius = max(5, round(20 * min(width / 1920, height / 1080)))
+        peak_radius = max(5, round(20 * min(width / FHD_1080.width, height / FHD_1080.height)))
         candidates: list[ShopCartridgeTemplateCandidate] = []
         for shop_id in SHOP_PURCHASE_REFERENCES:
             matches = self.vision.match_all(
@@ -380,11 +385,11 @@ class ShopCartridgeNavigationMixin:
         height = frame.shape[0]
         cluster_radius = max(
             5,
-            round(SHOP_CARTRIDGE_ROW_CLUSTER_RADIUS * height / 1080),
+            round(SHOP_CARTRIDGE_ROW_CLUSTER_RADIUS * height / FHD_1080.height),
         )
         ocr_link_radius = max(
             5,
-            round(SHOP_CARTRIDGE_OCR_ROW_LINK_RADIUS * height / 1080),
+            round(SHOP_CARTRIDGE_OCR_ROW_LINK_RADIUS * height / FHD_1080.height),
         )
         ocr_rows = self._shop_cartridge_ocr_rows(frame)
         clusters: list[list[ShopCartridgeTemplateCandidate]] = []
@@ -525,7 +530,7 @@ class ShopCartridgeNavigationMixin:
             frame, spec, result = found
             self.vision.click_client(result.center, frame.shape, after_sleep=0.5)
 
-            end_at = monotonic() + 4.0
+            end_at = monotonic() + SHOP_CARTRIDGE_SELECT_CONFIRM_TIMEOUT
             while monotonic() <= end_at:
                 selected_frame = self.vision.capture()
                 selected = self._confirmed_shop_cartridge_detections(
@@ -541,7 +546,7 @@ class ShopCartridgeNavigationMixin:
                     self._status(f"卡带亮度 {shop_id}", f"{brightness:.3f}")
                     if SHOP_CARTRIDGE_BRIGHTNESS.is_selected(brightness):
                         return True
-                self.task.sleep(0.25)
+                self.task.sleep(SHOP_CARTRIDGE_SELECT_POLL_INTERVAL)
         return False
 
     def _align_unfavorited_points(self, shop_id: str) -> bool:
@@ -579,8 +584,8 @@ class ShopCartridgeNavigationMixin:
         return True
 
     def _star_spec(self, slot: int, point: tuple[float, float]) -> TemplateSpec:
-        half_x = STAR_ROI_HALF_SIZE_X / 1920
-        half_y = STAR_ROI_HALF_SIZE_Y / 1080
+        half_x = STAR_ROI_HALF_SIZE_X / FHD_1080.width
+        half_y = STAR_ROI_HALF_SIZE_Y / FHD_1080.height
         return TemplateSpec(
             name=f"星标#{slot}",
             file_name=STAR_TEMPLATE_FILE,

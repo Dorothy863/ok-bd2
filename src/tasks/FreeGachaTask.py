@@ -8,6 +8,15 @@ from src.utils.ocr_utils import keyword_match_count
 
 KEYWORD_MATCH_RATIO = 0.9
 
+# 以下点击点均为 1920×1080 参考（_click_reference 按当前客户区归一）。
+GACHA_ENTRY_REFERENCE_POINT = (162, 986)
+EQUIPMENT_TAB_REFERENCE_POINT = (175, 432)
+BACK_BUTTON_REFERENCE_POINT = (105, 51)
+FREE_GACHA_BUTTON_REFERENCE_POINT = (347, 973)
+CONFIRM_DIALOG_OK_REFERENCE_POINT = (1045, 649)
+RESULT_PAGE_CLOSE_REFERENCE_POINT = (1420, 326)
+SKIP_BUTTON_REFERENCE_POINT = (1770, 60)
+
 
 class FreeGachaTask(TaskVisionMixin, BaseBD2Task):
     vision_threshold_key = "加载页面阈值"
@@ -71,7 +80,7 @@ class FreeGachaTask(TaskVisionMixin, BaseBD2Task):
             self.info_set("状态", "白嫖抽抽乐入口前主页确认失败。")
             self.log_info("白嫖抽抽乐：入口前未同时确认左列关键词、亮度和抽抽乐文字，不点击抽抽乐入口。")
             return False
-        self._click_reference(162, 986, after_sleep=0.5)
+        self._click_reference(*GACHA_ENTRY_REFERENCE_POINT, after_sleep=0.5)
         loading_state, gacha_found, _ = self._wait_loading_or_gacha_page("进入抽卡页")
         if loading_state == "stuck":
             return False
@@ -85,7 +94,7 @@ class FreeGachaTask(TaskVisionMixin, BaseBD2Task):
             return False
 
         self._sleep_after_recognition()
-        self._click_reference(175, 432, after_sleep=0.8)
+        self._click_reference(*EQUIPMENT_TAB_REFERENCE_POINT, after_sleep=0.8)
         if not self._wait_for_gacha_page("切换装备抽卡"):
             return False
 
@@ -96,7 +105,7 @@ class FreeGachaTask(TaskVisionMixin, BaseBD2Task):
             return False
 
         self._sleep_after_recognition()
-        self._click_reference(105, 51, after_sleep=1.0)
+        self._click_reference(*BACK_BUTTON_REFERENCE_POINT, after_sleep=1.0)
         if not self._wait_loading_or_home_confirmation("抽抽乐返回主页"):
             return False
 
@@ -116,12 +125,12 @@ class FreeGachaTask(TaskVisionMixin, BaseBD2Task):
             return True
 
         self._sleep_after_recognition()
-        self._click_reference(347, 973, after_sleep=0.5)
+        self._click_reference(*FREE_GACHA_BUTTON_REFERENCE_POINT, after_sleep=0.5)
         if not self._wait_for_confirm_dialog(section_name):
             return False
 
         self._sleep_after_recognition()
-        self._click_reference(1045, 649, after_sleep=1.0)
+        self._click_reference(*CONFIRM_DIALOG_OK_REFERENCE_POINT, after_sleep=1.0)
         if not self._handle_result_until_back(section_name):
             return False
 
@@ -316,11 +325,10 @@ class FreeGachaTask(TaskVisionMixin, BaseBD2Task):
         self.log_info(f"{section_name}：已确认抽抽乐券详情页，等待后关闭并返回抽卡页面。")
         self.sleep(max(0.0, float(self.config.get("结果页关闭前等待秒数", 1.0))))
         self._click_reference(
-            1420,
-            326,
+            *RESULT_PAGE_CLOSE_REFERENCE_POINT,
             after_sleep=max(0.0, float(self.config.get("结果页返回前等待秒数", 1.0))),
         )
-        self._click_reference(105, 51, after_sleep=0.0)
+        self._click_reference(*BACK_BUTTON_REFERENCE_POINT, after_sleep=0.0)
         return self._wait_for_gacha_page(f"{section_name} 返回抽卡页")
 
     def _click_skip_until_back_page(self, section_name: str) -> tuple[bool, str]:
@@ -336,7 +344,7 @@ class FreeGachaTask(TaskVisionMixin, BaseBD2Task):
         end_at = monotonic() + duration
 
         while monotonic() < end_at:
-            self._click_reference(1770, 60, after_sleep=0.0)
+            self._click_reference(*SKIP_BUTTON_REFERENCE_POINT, after_sleep=0.0)
             remaining = end_at - monotonic()
             if remaining <= 0:
                 break
