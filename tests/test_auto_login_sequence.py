@@ -719,3 +719,89 @@ class AutoLoginSequenceTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+class AutoLoginEscRecoveryTest(unittest.TestCase):
+    """ESC 返回主页恢复逻辑：宽限、前台发送、等待加载、次数上限。"""
+
+    def _task(self):
+        task = object.__new__(AutoLoginTask)
+        task.config = {
+            "主页 UI 等待宽限秒数": 15.0,
+            "游戏内返回主页按键方式": "前台",
+            "游戏内返回主页尝试间隔秒数": 4.0,
+            "游戏内返回主页最大尝试次数": 3,
+            "返回主页后加载等待秒数": 6.0,
+        }
+        task.info_set = lambda *_args, **_kwargs: None
+        task.log_info = lambda *_args, **_kwargs: None
+        task.log_warning = lambda *_args, **_kwargs: None
+        task.sleep = lambda *_args, **_kwargs: None
+        task._esc_home_attempts = 0
+        task._last_esc_home_at = 0.0
+        task._esc_home_wait_since = None
+        task._esc_hold_until = 0.0
+        task._esc_home_user_notified_at = 0.0
+        task._state = "waiting"
+        task._match = lambda *_args, **_kwargs: MatchResult(-1.0, (0, 0), (0, 0))
+        task._passes = lambda *_args, **_kwargs: False
+        return task
+
+    def _frame(self):
+        return np.zeros((10, 10, 3), dtype=np.uint8)
+
+    def test_grace_period_does_not_send_esc(self):
+        task = self._task()
+        task._esc_home_wait_since = monotonic()  # 刚进入等待，宽限期未过
+        calls = []
+        task._send_esc = lambda foreground: calls.append(foreground)
+
+        self.assertFalse(AutoLoginTask._maybe_esc_back_to_home(task, self._frame()))
+        self.assertEqual([], calls)
+        self.assertEqual(0, task._esc_home_attempts)
+
+    def test_sends_foreground_esc_after_grace_then_holds_for_load(self):
+        task = self._task()
+        task._esc_home_wait_since = monotonic() - 30.0  # 已过宽限期
+        calls = []
+        task._send_esc = lambda foreground: calls.append(foreground)
+
+        # 第一次：发送前台 ESC
+        self.assertTrue(AutoLoginTask._maybe_esc_back_to_home(task, self._frame()))
+        self.assertEqual([True], calls)
+        self.assertEqual(1, task._esc_home_attempts)
+
+        # 紧接着再调用：处于“等待加载”保持期，不重复按 ESC
+        self.assertTrue(AutoLoginTask._maybe_esc_back_to_home(task, self._frame()))
+        self.assertEqual([True], calls)
+        self.assertEqual(1, task._esc_home_attempts)
+
+    def test_loading_screen_extends_hold_without_sending(self):
+        task = self._task()
+        task._esc_home_wait_since = monotonic() - 30.0
+        task._last_esc_home_at = 0.0
+        task._esc_hold_until = 0.0
+        task._match = lambda *_args, **_kwargs: MatchResult(0.9, (0, 0), (1, 1))
+        task._passes = lambda *_args, **_kwargs: True
+        calls = []
+        task._send_esc = lambda foreground: calls.append(foreground)
+
+        self.assertTrue(AutoLoginTask._maybe_esc_back_to_home(task, self._frame()))
+        self.assertEqual([], calls)
+        self.assertGreater(task._esc_hold_until, monotonic())
+
+    def test_attempt_cap_stops_sending_and_asks_manual(self):
+        task = self._task()
+        task._esc_home_wait_since = monotonic() - 30.0
+        task._esc_home_attempts = 3  # 已达上限
+        task._esc_hold_until = 0.0
+        task._last_esc_home_at = 0.0
+        calls = []
+        task._send_esc = lambda foreground: calls.append(foreground)
+
+        self.assertTrue(AutoLoginTask._maybe_esc_back_to_home(task, self._frame()))
+        self.assertEqual([], calls)
+        self.assertEqual(3, task._esc_home_attempts)
+
+
+if __name__ == "__main__":
+    unittest.main()
