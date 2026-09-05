@@ -107,6 +107,20 @@ from src.tasks.map_trade.navigator_constants import (
     StoryBadgeCandidate,
     StoryBadgeDetection,
 )
+from src.tasks.map_trade.navigator_sandbox import SandboxNavigationMixin
+from src.tasks.map_trade.navigator_story import StoryCardNavigationMixin
+from src.tasks.map_trade.navigator_trade import TradeNavigationMixin
+from src.tasks.map_trade.vision import Vision, normalize_text
+from src.utils.home_confirmation import (
+    HOME_ANNOUNCEMENT_CLEAR_RELATIVE_POINT,
+    HOME_GACHA_OCR_RELATIVE_ROI,
+    HOME_LEFT_COLUMN_OCR_RELATIVE_ROI,
+    HOME_LEFT_COLUMN_REQUIRED_HITS,
+    home_confirmation_passes,
+    home_gacha_ocr_with_fallback,
+    home_left_column_hits,
+    home_left_column_p95_brightness,
+)
 
 __all__ = [
     "BARGAIN_CONFIRM_POINT",
@@ -183,20 +197,8 @@ __all__ = [
     "TELEPORT_MAP_RETURN_RELATIVE_POINT",
     "TELEPORT_MAP_TITLE_OCR_RELATIVE_ROI",
 ]
-from src.tasks.map_trade.navigator_sandbox import SandboxNavigationMixin
-from src.tasks.map_trade.navigator_story import StoryCardNavigationMixin
-from src.tasks.map_trade.navigator_trade import TradeNavigationMixin
-from src.tasks.map_trade.vision import Vision, normalize_text
-from src.utils.home_confirmation import (
-    HOME_ANNOUNCEMENT_CLEAR_RELATIVE_POINT,
-    HOME_GACHA_OCR_RELATIVE_ROI,
-    HOME_LEFT_COLUMN_OCR_RELATIVE_ROI,
-    HOME_LEFT_COLUMN_REQUIRED_HITS,
-    home_confirmation_passes,
-    home_gacha_ocr_with_fallback,
-    home_left_column_hits,
-    home_left_column_p95_brightness,
-)
+
+
 
 
 class Navigator(StoryCardNavigationMixin, SandboxNavigationMixin, TradeNavigationMixin):

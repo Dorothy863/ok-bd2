@@ -20,6 +20,10 @@ from src.tasks.map_trade.trader_constants import (
     STAR_ROI_HALF_SIZE_Y,
     STAR_TEMPLATE_THRESHOLD,
 )
+from src.tasks.map_trade.trader_cooking import CookingFlowMixin
+from src.tasks.map_trade.trader_pricing import PriceDiscoveryMixin
+from src.tasks.map_trade.trader_sell import SellFlowMixin
+from src.tasks.map_trade.vision import Vision
 
 __all__ = [
     "BUY_CONFIRM_DIALOG_REGION",
@@ -32,10 +36,6 @@ __all__ = [
     "STAR_ROI_HALF_SIZE_Y",
     "STAR_TEMPLATE_THRESHOLD",
 ]
-from src.tasks.map_trade.trader_cooking import CookingFlowMixin
-from src.tasks.map_trade.trader_pricing import PriceDiscoveryMixin
-from src.tasks.map_trade.trader_sell import SellFlowMixin
-from src.tasks.map_trade.vision import Vision
 
 
 class Trader(
