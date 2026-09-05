@@ -215,7 +215,7 @@ class SquareGoddessTask(BaseBD2Task):
     def _enter_square_from_home(self) -> bool:
         self.info_set("当前阶段", "打开卡带快速切换")
         if not self.open_cartridge_quick_switcher(
-            ensure_home=self._wait_for_cartridge_home,
+            ensure_home=self._ensure_home_with_return,
             click_quick_switch=lambda: self._click_template_until(
                 # 返回战场后快速切换图标位置随场景变化：全帧匹配，不再限定底部 ROI。
                 replace(QUICK_SWITCH_TEMPLATE, roi=None, candidate_center_roi=None),
@@ -248,6 +248,25 @@ class SquareGoddessTask(BaseBD2Task):
         ):
             return True
 
+        return False
+
+    def _ensure_home_with_return(self) -> bool:
+        """确认是否在主页；只有“不在主页”时才点右上角小房子回主页再重试。
+
+        正常流程：确认主页→(是)直接继续；确认失败才执行回主页操作，
+        避免在已处于主页/返回战场时误点。
+        """
+        confirm_tries = int(self.config.get("主页确认自动返回主页次数", 2)) + 1
+        for attempt in range(1, confirm_tries + 1):
+            if self._wait_for_cartridge_home(
+                timeout=float(self.config.get("主页确认等待秒数", 10.0))
+            ):
+                return True
+            if attempt < confirm_tries:
+                self.log_info(
+                    f"广场女神像：第 {attempt} 次未确认到主页，点右上角小房子返回主页后重试。"
+                )
+                self.attempt_return_home()
         return False
 
     def _click_fantasia_square_card(self) -> bool:
