@@ -92,11 +92,18 @@ class BaseBD2Task(BaseTask):
         self.default_config.update(
             {
                 "识别成功后等待秒数": 1.0,
+                # 自动返回主页按钮位置（右上角“小房子”，格鲁菲餐厅实测 2560x1440 的约 (2400,85)）。
+                "返回主页按钮 X 百分比": 93.75,
+                "返回主页按钮 Y 百分比": 5.9,
+                "主页确认自动返回主页次数": 2,
             }
         )
         self.config_description.update(
             {
                 "识别成功后等待秒数": "识别成功后，执行下一步点击或切换操作前等待多久。",
+                "返回主页按钮 X 百分比": "自动返回主页按钮的横向百分比。",
+                "返回主页按钮 Y 百分比": "自动返回主页按钮的纵向百分比。",
+                "主页确认自动返回主页次数": "主页确认超时后，自动点击返回主页按钮的最大次数。",
             }
         )
 
@@ -291,6 +298,28 @@ class BaseBD2Task(BaseTask):
         if interaction is not None and hasattr(interaction, "operate"):
             return interaction.operate(func, block=block, restore_cursor=restore_cursor)
         return func()
+
+    def attempt_return_home(self, name: str = "自动返回主页") -> bool:
+        """正式路径点击右上角“主页”按钮，把角色从子界面带回主页面。
+
+        注意：需要调用方先确认当前不在主页面（或在主页确认失败后调用），
+        避免在主页面误点该位置。会移动真实光标（正式版方案）。
+        """
+        try:
+            x = float(self.config.get("返回主页按钮 X 百分比", 93.75)) / 100.0
+            y = float(self.config.get("返回主页按钮 Y 百分比", 5.9)) / 100.0
+            self.log_info(f"{name}：点击右上角主页按钮返回主界面。")
+            self.operate_click(
+                x,
+                y,
+                name=name,
+                after_sleep=2.0,
+                down_time=0.02,
+            )
+            return True
+        except Exception as exc:
+            self.log_warning(f"{name}：点击返回主页按钮失败：{exc}")
+            return False
 
     def operate_click(
         self,
