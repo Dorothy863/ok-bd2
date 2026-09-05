@@ -99,6 +99,9 @@ class BaseBD2Task(BaseTask):
                 "自动返回主页最大步数": 6,
                 "返回主页步间等待秒数": 2.5,
                 "左上角返回模板阈值": 0.55,
+                "左上角返回ROI右百分比": 13,  # 2560x1440 下约 x<333
+                "左上角返回ROI底百分比": 11,  # 2560x1440 下约 y<158
+
             }
         )
         self.config_description.update(
@@ -408,8 +411,8 @@ class BaseBD2Task(BaseTask):
             frame_h, frame_w = frame.shape[:2]
             left = 0
             top = 0
-            right = int(frame_w * 0.34)
-            bottom = int(frame_h * 0.22)
+            right = int(frame_w * float(self.config.get("左上角返回ROI右百分比", 13)) / 100.0)
+            bottom = int(frame_h * float(self.config.get("左上角返回ROI底百分比", 11)) / 100.0)
             if right <= left or bottom <= top:
                 return False
             crop = cv2.cvtColor(
