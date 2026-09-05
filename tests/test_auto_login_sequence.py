@@ -755,24 +755,27 @@ class AutoLoginEscRecoveryTest(unittest.TestCase):
         calls = []
         task._send_esc = lambda foreground: calls.append(foreground)
 
-        self.assertFalse(AutoLoginTask._maybe_esc_back_to_home(task, self._frame()))
+        self.assertFalse(AutoLoginTask._maybe_return_home(task, self._frame()))
         self.assertEqual([], calls)
         self.assertEqual(0, task._esc_home_attempts)
 
-    def test_sends_foreground_esc_after_grace_then_holds_for_load(self):
+    def test_click_first_after_grace_then_holds_for_load(self):
         task = self._task()
         task._esc_home_wait_since = monotonic() - 30.0  # 已过宽限期
-        calls = []
-        task._send_esc = lambda foreground: calls.append(foreground)
+        clicks = []
+        escs = []
+        task._send_return_home_click = lambda: clicks.append(True)
+        task._send_esc = lambda foreground: escs.append(foreground)
 
-        # 第一次：发送前台 ESC
-        self.assertTrue(AutoLoginTask._maybe_esc_back_to_home(task, self._frame()))
-        self.assertEqual([True], calls)
+        # 第一次：优先点击右上角主页按钮（不是 ESC）
+        self.assertTrue(AutoLoginTask._maybe_return_home(task, self._frame()))
+        self.assertEqual([True], clicks)
+        self.assertEqual([], escs)
         self.assertEqual(1, task._esc_home_attempts)
 
-        # 紧接着再调用：处于“等待加载”保持期，不重复按 ESC
-        self.assertTrue(AutoLoginTask._maybe_esc_back_to_home(task, self._frame()))
-        self.assertEqual([True], calls)
+        # 紧接着再调用：处于“等待加载”保持期，不重复操作
+        self.assertTrue(AutoLoginTask._maybe_return_home(task, self._frame()))
+        self.assertEqual([True], clicks)
         self.assertEqual(1, task._esc_home_attempts)
 
     def test_loading_screen_extends_hold_without_sending(self):
@@ -785,7 +788,7 @@ class AutoLoginEscRecoveryTest(unittest.TestCase):
         calls = []
         task._send_esc = lambda foreground: calls.append(foreground)
 
-        self.assertTrue(AutoLoginTask._maybe_esc_back_to_home(task, self._frame()))
+        self.assertTrue(AutoLoginTask._maybe_return_home(task, self._frame()))
         self.assertEqual([], calls)
         self.assertGreater(task._esc_hold_until, monotonic())
 
@@ -798,7 +801,7 @@ class AutoLoginEscRecoveryTest(unittest.TestCase):
         calls = []
         task._send_esc = lambda foreground: calls.append(foreground)
 
-        self.assertTrue(AutoLoginTask._maybe_esc_back_to_home(task, self._frame()))
+        self.assertTrue(AutoLoginTask._maybe_return_home(task, self._frame()))
         self.assertEqual([], calls)
         self.assertEqual(3, task._esc_home_attempts)
 

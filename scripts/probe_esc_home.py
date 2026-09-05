@@ -1,12 +1,12 @@
 """Headless runner for BD2SceneEscProbeTask.
 
 Usage:
-    uv run python scripts/probe_esc_home.py [不发送|后台|前台|后台→前台]
-Aliases: none|background|foreground|both (default: 后台→前台)
+    uv run python scripts/probe_esc_home.py [mode]
+    uv run python scripts/probe_esc_home.py click X Y     # 纯后台点击像素 (X,Y)
 
-Requires the BrownDust II game window to be running. The runner never closes
-the game: exit_after=False is required so ok does not kill the managed game
-process when the probe finishes.
+modes: 不发送|后台|前台|后台→前台  (aliases none|background|foreground|both)
+Requires the BrownDust II game window to be running. Never closes the game
+(exit_after=False).
 """
 
 import sys
@@ -28,8 +28,23 @@ _ALIASES = {
 
 
 def main() -> int:
-    mode = sys.argv[1] if len(sys.argv) > 1 else "后台→前台"
-    mode = _ALIASES.get(mode, mode)
+    args = sys.argv[1:]
+    mode = "后台→前台"
+    click_x = -1
+    click_y = -1
+    click_count = 1
+    click_impl = "postmessage"
+    if args and args[0] in ("click", "clicko") and len(args) >= 3:
+        mode = "不发送"
+        click_x = int(args[1])
+        click_y = int(args[2])
+        if args[0] == "clicko":
+            click_impl = "operate"
+        if len(args) >= 4:
+            click_count = int(args[3])
+    elif args:
+        mode = _ALIASES.get(args[0], args[0])
+
     if mode not in ("不发送", "后台", "前台", "后台→前台"):
         print(f"未知 ESC 模式: {mode}")
         return 2
@@ -42,6 +57,10 @@ def main() -> int:
 
     task = app.get_task(BD2SceneEscProbeTask)[0]
     task.config["ESC 模式"] = mode
+    task.config["后台点击 X 像素"] = click_x
+    task.config["后台点击 Y 像素"] = click_y
+    task.config["后台点击次数"] = click_count
+    task.config["后台点击实现"] = click_impl
     # exit_after=False：结束时不要关闭 ok 管理的游戏进程。
     app.run_onetime_task(task, exit_after=False)
     return 0

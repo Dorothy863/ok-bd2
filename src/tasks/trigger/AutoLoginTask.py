@@ -111,8 +111,14 @@ class AutoLoginTask(BaseBD2Task):
                 "小屋按钮点击 Y 百分比": 14.3519,
                 "公告清理点击 X 百分比": 8.8020833333,
                 "公告清理点击 Y 百分比": 56.9444444444,
-                # 游戏已登录但不在主界面（如格鲁菲餐厅）时，自动按 ESC 返回主页。
-                "游戏内返回主页按键方式": "前台",  # 前台 / 后台
+                # 游戏已登录但不在主界面（如格鲁菲餐厅）时，自动返回主页。
+                # 纯后台 PostMessage 点击/按键对该 Unity 游戏无效（2026-09-05 实测），
+                # 必须走正式 operate_click（移动真实光标）或前台按键。
+                "游戏内返回主页先点按钮": True,  # 优先点右上角主页按钮
+                "返回主页点击最大次数": 2,
+                "返回主页按钮 X 百分比": 93.75,
+                "返回主页按钮 Y 百分比": 5.9,
+                "游戏内返回主页按键方式": "前台",  # 点击无效后的兜底：前台 / 后台
                 "游戏内返回主页尝试间隔秒数": 4.0,
                 "游戏内返回主页最大尝试次数": 3,
                 "返回主页后加载等待秒数": 6.0,
@@ -282,7 +288,7 @@ class AutoLoginTask(BaseBD2Task):
             self._set_stage("等待更新或登录页")
             self._set_action("Confirm 已处理，等待更新下载提示或 TOUCH TO START。")
         else:
-            if self._maybe_esc_back_to_home(frame):
+            if self._maybe_return_home(frame):
                 return False
             self._state = "waiting"
             self._set_stage("等待登录页")
@@ -831,18 +837,20 @@ class AutoLoginTask(BaseBD2Task):
         self.info_set("BrownDustX Confirm 点击", f"{x},{y}")
         self.operate_click(x, y, after_sleep=after_sleep)
 
-    def _maybe_esc_back_to_home(self, frame) -> bool:
-        """既非登录页也非主页时，把游戏切前台按 ESC 返回主界面。
+    def _maybe_return_home(self, frame) -> bool:
+        """既非登录页也非主页（如格鲁菲餐厅）时自动返回主界面。
 
         走到这里时登录页相关信号（BrownDustX / Confirm / 更新下载 /
-        TOUCH TO START）已排除、主页三项信号确认失败——典型是游戏已登录
-        但停在子界面（如格鲁菲餐厅）。前台按键 + 等待加载，确认主页后由
-        run() 放行挂起的“一键完成日常”。返回 True 表示本轮由本流程接管，
-        调用方不要再把阶段覆盖回“等待登录页”。
+        TOUCH TO START）已排除、主页三项信号确认失败。优先用正式路径
+        operate_click 点右上角“主页”按钮（会移动真实光标，纯后台 PostMessage
+        对该游戏无效）；点击无效后改用 ESC（默认前台），仍无效则提示手动。
+        返回 True 表示本轮由本流程接管，调用方不要再覆盖回“等待登录页”。
         """
         now = monotonic()
         attempts = int(getattr(self, "_esc_home_attempts", 0))
-        mode = str(self.config.get("游戏内返回主页按键方式", "前台"))
+        esc_mode = str(self.config.get("游戏内返回主页按键方式", "前台"))
+        click_first = bool(self.config.get("游戏内返回主页先点按钮", True))
+        max_click = int(self.config.get("返回主页点击最大次数", 2))
         interval = float(self.config.get("游戏内返回主页尝试间隔秒数", 4.0))
         max_attempts = int(self.config.get("游戏内返回主页最大尝试次数", 3))
         load_wait = float(self.config.get("返回主页后加载等待秒数", 6.0))
@@ -852,7 +860,7 @@ class AutoLoginTask(BaseBD2Task):
             self._esc_home_wait_since = now
         wait_since = self._esc_home_wait_since
 
-        # 宽限期内保持“等待登录页”，避免把加载/转场误判成非主页而误按 ESC。
+        # 宽限期内保持“等待登录页”，避免把加载/转场误判成非主页而误操作。
         if attempts == 0 and now - wait_since < grace_seconds:
             return False
 
@@ -862,17 +870,17 @@ class AutoLoginTask(BaseBD2Task):
             if now - getattr(self, "_esc_home_user_notified_at", 0.0) >= 60.0:
                 self._esc_home_user_notified_at = now
                 self._set_stage("等待手动返回主页")
-                self._set_action("多次自动按 ESC 未能回到主界面，请在游戏内按 ESC 手动返回主界面。")
+                self._set_action("多次自动返回主页失败，请在游戏内手动返回主界面。")
                 self.log_info(
-                    "自动登录：多次自动按 ESC 未能回到主界面，请手动返回主界面。",
+                    "自动登录：多次自动返回主页失败，请手动返回主界面。",
                     notify=True,
                 )
             return True
 
-        # 刚按过 ESC：游戏可能正在转场加载，先等加载完成，别补按。
+        # 刚操作过：游戏可能正在转场加载，先等加载完成，别重复操作。
         if now < getattr(self, "_esc_hold_until", 0.0):
             self._set_stage("返回主页")
-            self._set_action("已按 ESC，等待游戏加载完成后确认主页。")
+            self._set_action("已操作返回主页，等待游戏加载完成后确认主页。")
             return True
 
         loading = self._match(frame, LOADING_TEMPLATE)
@@ -888,27 +896,56 @@ class AutoLoginTask(BaseBD2Task):
         if now - getattr(self, "_last_esc_home_at", 0.0) < interval:
             return True
 
-        foreground = mode != "后台"
-        self._esc_home_attempts = attempts + 1
+        attempt_no = attempts + 1
+        self._esc_home_attempts = attempt_no
         self._last_esc_home_at = now
         self._esc_hold_until = now + load_wait
         self._set_stage("返回主页")
-        if foreground:
+
+        use_click = bool(click_first and attempt_no <= max_click)
+        if use_click:
             self._set_action(
-                f"切到前台按 ESC 返回主界面（第 {self._esc_home_attempts}/{max_attempts} 次）。"
+                f"点击右上角主页按钮返回主界面（第 {attempt_no}/{max_attempts} 次）。"
             )
+            self.log_info(
+                "自动登录：检测到游戏内非主页界面，点击右上角主页按钮返回主页"
+                f"（第 {attempt_no}/{max_attempts} 次）。",
+                notify=attempt_no == 1,
+            )
+            self._send_return_home_click()
         else:
-            self._set_action(
-                f"后台按 ESC 返回主界面（第 {self._esc_home_attempts}/{max_attempts} 次）。"
+            foreground = esc_mode != "后台"
+            if foreground:
+                self._set_action(
+                    f"点击无效，切前台按 ESC 返回主界面（第 {attempt_no}/{max_attempts} 次）。"
+                )
+            else:
+                self._set_action(
+                    f"点击无效，后台按 ESC 返回主界面（第 {attempt_no}/{max_attempts} 次）。"
+                )
+            self.log_info(
+                "自动登录：点击返回主页按钮无效，"
+                f"{'前台' if foreground else '后台'}按 ESC 尝试返回主页"
+                f"（第 {attempt_no}/{max_attempts} 次）。",
+                notify=attempt_no == max_click + 1,
             )
-        self.log_info(
-            "自动登录：检测到游戏内非主页界面，"
-            f"{'前台' if foreground else '后台'}按 ESC 尝试返回主页"
-            f"（第 {self._esc_home_attempts}/{max_attempts} 次）。",
-            notify=self._esc_home_attempts == 1,
-        )
-        self._send_esc(foreground=foreground)
+            self._send_esc(foreground=foreground)
         return True
+
+    def _send_return_home_click(self) -> None:
+        """正式路径点击右上角“主页”按钮（operate_click 会移动真实光标）。"""
+        try:
+            x = float(self.config.get("返回主页按钮 X 百分比", 93.75)) / 100.0
+            y = float(self.config.get("返回主页按钮 Y 百分比", 5.9)) / 100.0
+            self.operate_click(
+                x,
+                y,
+                name="返回主页按钮",
+                after_sleep=1.0,
+                down_time=0.02,
+            )
+        except Exception as exc:
+            self.log_warning(f"自动登录：点击返回主页按钮失败：{exc}")
 
     def _send_esc(self, foreground: bool) -> None:
         try:
