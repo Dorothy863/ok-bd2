@@ -1,4 +1,5 @@
 import re
+from dataclasses import replace
 from pathlib import Path
 from time import monotonic
 
@@ -216,7 +217,8 @@ class SquareGoddessTask(BaseBD2Task):
         if not self.open_cartridge_quick_switcher(
             ensure_home=self._wait_for_cartridge_home,
             click_quick_switch=lambda: self._click_template_until(
-                QUICK_SWITCH_TEMPLATE,
+                # 返回战场后快速切换图标位置随场景变化：全帧匹配，不再限定底部 ROI。
+                replace(QUICK_SWITCH_TEMPLATE, roi=None, candidate_center_roi=None),
                 timeout=float(self.config.get("快速卡带等待秒数", 10.0)),
                 name="快速切换按钮",
                 after_sleep=0.0,
@@ -234,9 +236,10 @@ class SquareGoddessTask(BaseBD2Task):
             self.log_info("广场女神像：点击后未确认生活玩法游戏卡带类别高亮。")
             return False
 
-        self.info_set("当前阶段", "选择广场卡带2号位")
+        self.info_set("当前阶段", "选择梦幻广场卡带")
         self.sleep(FIXED_CARTRIDGE_SLOT_PRE_CLICK_DELAY_SECONDS)
-        self.operate_click(*SQUARE_CARTRIDGE_SLOT_POINT, after_sleep=0.0)
+        if not self._click_fantasia_square_card():
+            return False
 
         if self._wait_for_template(
             FANTASIA_SQUARE_TEMPLATE,
@@ -246,6 +249,59 @@ class SquareGoddessTask(BaseBD2Task):
             return True
 
         return False
+
+    def _click_fantasia_square_card(self) -> bool:
+        """在生活玩法卡带列表里定位并点击 梦幻广场 卡带。
+
+        卡带编排可被玩家自定义，固定 2 号位坐标会点错（BUG-20260905）；
+        先按“梦幻广场 / FANTASIA”文字 OCR 命中点卡带中心，找不到再退回固定坐标。
+        """
+        clicked = False
+        try:
+            frame = self.capture_frame()
+            boxes = list(
+                self.ocr(
+                    frame=frame,
+                    threshold=float(self.config.get("广场 OCR 阈值", 0.2)),
+                    log=False,
+                    name="梦幻广场卡带",
+                )
+            )
+        except Exception as exc:
+            self.log_warning(f"广场女神像：OCR 梦幻广场卡带失败：{exc}")
+            boxes = []
+
+        for box in boxes:
+            name = str(getattr(box, "name", "") or "")
+            lowered = name.lower().replace(" ", "")
+            if "梦幻广场" not in name and "fantasia" not in lowered:
+                continue
+            try:
+                x, y, w, h = int(box.x), int(box.y), int(box.width), int(box.height)
+            except Exception:
+                continue
+            if w <= 0 or h <= 0:
+                continue
+            frame_h, frame_w = frame.shape[:2]
+            center_x, center_y = x + w // 2, y + h // 2
+            self.info_set("梦幻广场卡带 OCR", f"{name}@{center_x},{center_y}")
+            self.log_info(
+                "广场女神像：OCR 命中梦幻广场卡带，"
+                f"name={name}, center=({center_x},{center_y})。"
+            )
+            self.operate_click(
+                center_x / max(1, frame_w),
+                center_y / max(1, frame_h),
+                name="梦幻广场卡带",
+                after_sleep=0.0,
+            )
+            clicked = True
+            break
+
+        if not clicked:
+            self.log_info("广场女神像：未 OCR 到梦幻广场卡带，使用固定 2 号位坐标兜底。")
+            self.operate_click(*SQUARE_CARTRIDGE_SLOT_POINT, after_sleep=0.0)
+        return True
 
     def _wait_for_cartridge_home(
         self,
