@@ -5,6 +5,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import numpy as np
+from PIL import Image
 
 from src.tasks.map_trade.data import (
     SHOP_CARTRIDGE_LABELS,
@@ -32,7 +33,10 @@ from src.tasks.map_trade.trader import (
     STAR_TEMPLATE_THRESHOLD,
     Trader,
 )
-from src.tasks.map_trade.trader_constants import SHOP_CARTRIDGE_OCR_RELATIVE_ROI
+from src.tasks.map_trade.trader_constants import (
+    SHOP_CARTRIDGE_OCR_RELATIVE_ROI,
+    SHOP_UP_SCROLL_RECOGNITION_INTERVAL,
+)
 from src.tasks.map_trade.vision import Vision
 from src.utils.calibration import FHD_1080
 from src.utils.image_utils import relative_roi_frame, scale_reference_roi
@@ -218,6 +222,127 @@ class ShopAndCatalogTest(unittest.TestCase):
             scrolls,
         )
         self.assertEqual([True], built)
+
+    def test_favorite_rebuild_corrects_off_page_landing_via_ocr_top_row(self):
+        scrolls = []
+        task = SimpleNamespace(
+            log_info=lambda *_args, **_kwargs: None,
+            log_warning=lambda *_args, **_kwargs: None,
+            info_set=lambda *_args, **_kwargs: None,
+        )
+        progress = SimpleNamespace(
+            favorite_card_complete=lambda _shop_id: False,
+            mark_favorite_card=lambda _shop_id: None,
+            mark_favorites_built=lambda: None,
+        )
+        trader = object.__new__(Trader)
+        trader.task = task
+        trader.progress = progress
+        trader._reset_shop_to_first_page = lambda: True
+        confirmations = iter((True, False, True, True, True))
+        trader._wait_for_shop_page = lambda _shop_ids: next(confirmations)
+        # 第2页落点低一格：顶部行号实测到 S10（行 9），锚点 S11（行 10）。
+        trader._shop_list_top_row_index = lambda _frame: 9
+        trader.vision = SimpleNamespace(
+            capture=lambda: np.zeros((1080, 1920, 3), dtype=np.uint8)
+        )
+        trader._scroll_shop_cartridges = lambda scroll_amount, count, interval, after_sleep: (
+            scrolls.append((scroll_amount, count, interval, after_sleep))
+        )
+        trader._select_purchase_cartridge = lambda _shop_id: True
+        trader._align_unfavorited_points = lambda _shop_id: True
+
+        self.assertTrue(trader.rebuild_favorites())
+        self.assertEqual(
+            [
+                (-1, 9, 0.1, 0.5),
+                (-1, 1, 0.0, SHOP_UP_SCROLL_RECOGNITION_INTERVAL),
+                (-1, 10, 0.1, 0.5),
+                (-1, 1, 0.1, 0.5),
+            ],
+            scrolls,
+        )
+
+    def test_favorite_rebuild_aborts_when_corrected_landing_still_unconfirmed(self):
+        scrolls = []
+        warnings = []
+        task = SimpleNamespace(
+            log_info=lambda *_args, **_kwargs: None,
+            log_warning=lambda message, *_args, **_kwargs: warnings.append(message),
+            info_set=lambda *_args, **_kwargs: None,
+        )
+        progress = SimpleNamespace(
+            favorite_card_complete=lambda _shop_id: False,
+            mark_favorite_card=lambda _shop_id: None,
+            mark_favorites_built=lambda: None,
+        )
+        trader = object.__new__(Trader)
+        trader.task = task
+        trader.progress = progress
+        trader._reset_shop_to_first_page = lambda: True
+        confirmations = iter((True, False, False))
+        trader._wait_for_shop_page = lambda _shop_ids: next(confirmations)
+        trader._shop_list_top_row_index = lambda _frame: 9
+        trader.vision = SimpleNamespace(
+            capture=lambda: np.zeros((1080, 1920, 3), dtype=np.uint8)
+        )
+        trader._scroll_shop_cartridges = lambda scroll_amount, count, interval, after_sleep: (
+            scrolls.append((scroll_amount, count, interval, after_sleep))
+        )
+        trader._select_purchase_cartridge = lambda _shop_id: True
+        trader._align_unfavorited_points = lambda _shop_id: True
+
+        self.assertFalse(trader.rebuild_favorites())
+        self.assertEqual(
+            [(-1, 9, 0.1, 0.5), (-1, 1, 0.0, SHOP_UP_SCROLL_RECOGNITION_INTERVAL)],
+            scrolls,
+        )
+        self.assertTrue(warnings)
+        self.assertIn("第2页边界卡带", warnings[0])
+
+    def test_favorite_rebuild_aborts_without_correction_when_ocr_top_row_unreadable(self):
+        scrolls = []
+        task = SimpleNamespace(
+            log_info=lambda *_args, **_kwargs: None,
+            log_warning=lambda *_args, **_kwargs: None,
+            info_set=lambda *_args, **_kwargs: None,
+        )
+        progress = SimpleNamespace(
+            favorite_card_complete=lambda _shop_id: False,
+            mark_favorite_card=lambda _shop_id: None,
+            mark_favorites_built=lambda: None,
+        )
+        trader = object.__new__(Trader)
+        trader.task = task
+        trader.progress = progress
+        trader._reset_shop_to_first_page = lambda: True
+        confirmations = iter((True, False))
+        trader._wait_for_shop_page = lambda _shop_ids: next(confirmations)
+        trader._shop_list_top_row_index = lambda _frame: None
+        trader.vision = SimpleNamespace(
+            capture=lambda: np.zeros((1080, 1920, 3), dtype=np.uint8)
+        )
+        trader._scroll_shop_cartridges = lambda scroll_amount, count, interval, after_sleep: (
+            scrolls.append((scroll_amount, count, interval, after_sleep))
+        )
+        trader._select_purchase_cartridge = lambda _shop_id: True
+        trader._align_unfavorited_points = lambda _shop_id: True
+
+        self.assertFalse(trader.rebuild_favorites())
+        self.assertEqual([(-1, 9, 0.1, 0.5)], scrolls)
+
+    def test_boundary_cartridge_templates_exclude_inter_row_dark_band(self):
+        # 第2页底行 R1 会被视口底边裁切；模板若带着行间均匀暗带，被裁行的匹配
+        # 会从 0.93 掉到 0.75（确认线 0.78 以下），边界确认必超时。
+        template_path = (
+            ROOT
+            / "recognition-assets"
+            / "template-assets"
+            / SHOP_PURCHASE_REFERENCES["R1"].cartridge_templates[0]
+        )
+        with Image.open(template_path) as image:
+            rows = np.asarray(image.convert("L"), dtype=float)
+        self.assertGreater(rows[-1].std(), 2.0)
 
     def test_reset_shop_page_scrolls_up_one_step_then_recognizes_again(self):
         task = SimpleNamespace(

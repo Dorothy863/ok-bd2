@@ -12,6 +12,7 @@ from src.tasks.map_trade.data import (
     SHOP_CARTRIDGE_ROW_INDEX,
     SHOP_FAVORITE_POINTS,
     SHOP_PURCHASE_REFERENCES,
+    ShopCartridgePage,
     shop_purchase_reference,
 )
 from src.tasks.map_trade.models import (
@@ -72,7 +73,7 @@ class ShopCartridgeNavigationMixin:
                     interval=SHOP_DOWN_SCROLL_INTERVAL,
                     after_sleep=0.5,
                 )
-            if not self._wait_for_shop_page(page.confirmation_shop_ids):
+            if not self._show_shop_page(page):
                 labels = "、".join(
                     SHOP_PURCHASE_REFERENCES[value].label
                     for value in page.confirmation_shop_ids
@@ -99,6 +100,27 @@ class ShopCartridgeNavigationMixin:
         self.progress.mark_favorites_built()
         self.task.log_info("买：31张商品卡带的空收藏位置已全部核对完成。")
         return True
+
+    def _show_shop_page(self, page: ShopCartridgePage) -> bool:
+        """确认目标页边界卡带；落点偏差时按 OCR 实测顶部行号修正一次再确认。"""
+        if self._wait_for_shop_page(page.confirmation_shop_ids):
+            return True
+        frame = self.vision.capture()
+        top_row_index = self._shop_list_top_row_index(frame)
+        if top_row_index is None:
+            return False
+        delta = SHOP_CARTRIDGE_ROW_INDEX[page.shop_ids[0]] - top_row_index
+        if delta != 0:
+            self.task.log_info(
+                f"买：第{page.page_number}页落点偏差，按OCR顶部行号修正{delta:+d}格。"
+            )
+            self._scroll_shop_cartridges(
+                scroll_amount=-1 if delta > 0 else 1,
+                count=abs(delta),
+                interval=0.0,
+                after_sleep=SHOP_UP_SCROLL_RECOGNITION_INTERVAL,
+            )
+        return self._wait_for_shop_page(page.confirmation_shop_ids)
 
     def _reset_shop_to_first_page(self) -> bool:
         for attempt in range(SHOP_FIRST_PAGE_MAX_UP_SCROLLS + 1):
