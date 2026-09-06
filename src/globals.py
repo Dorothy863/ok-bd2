@@ -20,7 +20,7 @@ class Globals(QObject):
         from src.game_path import seed_device_manager_launch_path
         from src.ui.feedback_report import install_feedback_report
         from src.ui.fluent_motion import install_fluent_page_transition, install_start_list_motion
-        from src.ui.live_screenshot import install_live_screenshot
+        from src.ui.live_screenshot import install_live_screenshot, install_start_tab_responsive
         from src.ui.nav_sections import install_nav_sections
         from src.ui.quest_theme import apply_app_font
 
@@ -31,6 +31,9 @@ class Globals(QObject):
             logger.info(f"seed BD2 Starter path {launch_path}")
         install_live_screenshot(main_window.start_tab)
         install_feedback_report(main_window.start_tab)
+        # 响应式化须在最后：它会排空 debug_layout 换成 WrapLayout，
+        # 先于 feedback_report 执行会让其 insertWidget 落空。
+        install_start_tab_responsive(main_window.start_tab)
         install_nav_sections(main_window)
         install_fluent_page_transition(main_window)
         install_start_list_motion(main_window.start_tab)

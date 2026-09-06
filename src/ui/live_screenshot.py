@@ -4,13 +4,13 @@ from concurrent.futures import ThreadPoolExecutor
 import cv2
 import numpy as np
 from ok.ui.qt.widget.Card import Card
-from PySide6.QtCore import QSize, Qt, QTimer, Signal
+from PySide6.QtCore import QEvent, QObject, QSize, Qt, QTimer, Signal
 from PySide6.QtGui import QImage, QPixmap
-from PySide6.QtWidgets import QHBoxLayout, QLabel, QSizePolicy, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QBoxLayout, QHBoxLayout, QLabel, QSizePolicy, QVBoxLayout, QWidget
 from qfluentwidgets import CaptionLabel
 
 PREVIEW_INTERVAL_MS = 50
-PREVIEW_MIN_WIDTH = 320
+PREVIEW_MIN_WIDTH = 272
 PREVIEW_ASPECT_WIDTH = 16
 PREVIEW_ASPECT_HEIGHT = 9
 TOP_ROW_MAX_HEIGHT = 240
@@ -20,6 +20,38 @@ CAPTURE_LIST_MAX_HEIGHT = 180
 TOP_CARD_CONTENT_EXTRA_HEIGHT = 58
 TOP_CARD_CONTENT_HEIGHT = CAPTURE_LIST_MAX_HEIGHT
 CAPTURE_TIMEOUT_SECONDS = 2.0
+
+# 实时截图/开发工具两列并排的最低行宽；再窄就纵向堆叠，否则两侧必有一侧被裁。
+LOWER_ROW_STACK_THRESHOLD = 600
+
+
+class _RowDirectionSwitcher(QObject):
+    """监听行容器 resize，窄于阈值时在并排/堆叠之间切换（QBoxLayout 方向翻转）。"""
+
+    def __init__(self, row: QWidget, layout: QBoxLayout):
+        super().__init__(row)
+        self._layout = layout
+        row.installEventFilter(self)
+        self._apply(row.width())
+
+    def eventFilter(self, watched, event):
+        if event.type() == QEvent.Type.Resize:
+            self._apply(watched.width())
+        return False
+
+    def _apply(self, width: int) -> None:
+        if width <= 0:
+            return
+        vertical = width < LOWER_ROW_STACK_THRESHOLD
+        direction = (
+            QBoxLayout.Direction.TopToBottom if vertical else QBoxLayout.Direction.LeftToRight
+        )
+        if self._layout.direction() == direction:
+            return
+        self._layout.setDirection(direction)
+        # 并排时两列均分宽度；堆叠时各自按内容取高度，不拉伸。
+        self._layout.setStretch(0, 0 if vertical else 1)
+        self._layout.setStretch(1, 0 if vertical else 1)
 
 
 class LivePreviewLabel(QLabel):
@@ -310,6 +342,58 @@ class LiveScreenshotWidget(QWidget):
         old_executor.shutdown(wait=False, cancel_futures=True)
 
 
+def install_start_tab_responsive(start_tab) -> None:
+    """解除首页的固定最小宽度，窗口收窄时内容压缩/折行而不是整体被右缘裁掉。
+
+    Tab 基类禁用了水平滚动条，任何子控件的固定最小宽度都会把整页 view 锁宽：
+    三列选择行的列表、开发工具按钮行、顶部 StartCard 的标题文本都是来源。
+    """
+    if getattr(start_tab, "_bd2_start_tab_responsive_installed", False):
+        return
+
+    for attr in ("device_list", "capture_list", "interaction_list"):
+        widget = getattr(start_tab, attr, None)
+        if widget is not None:
+            widget.setMinimumWidth(0)
+
+    start_card = getattr(start_tab, "start_card", None)
+    if start_card is not None:
+        from src.ui.shrinkable_label import ShrinkableLabel
+
+        # 标题/版本号换为可压缩标签（省略号收尾），保证「截图/刷新/开始」始终可见。
+        for attr in ("titleLabel", "contentLabel"):
+            old = getattr(start_card, attr, None)
+            if old is None:
+                continue
+            new = ShrinkableLabel(old.text(), start_card)
+            new.setObjectName(old.objectName())
+            new.setFont(old.font())
+            new.setAlignment(old.alignment())
+            start_card.vBoxLayout.replaceWidget(old, new)
+            old.deleteLater()
+            setattr(start_card, attr, new)
+
+    debug_widget = getattr(start_tab, "debug_widget", None)
+    debug_layout = getattr(start_tab, "debug_layout", None)
+    debug_card = _card_for_widget(debug_widget)
+    if debug_card is not None and debug_layout is not None:
+        from src.ui.wrap_layout import wrap_container
+
+        buttons = []
+        while debug_layout.count():
+            item = debug_layout.takeAt(0)
+            if item is not None and item.widget() is not None:
+                buttons.append(item.widget())
+        container, wrap = wrap_container(buttons)
+        debug_card.topLayout.removeWidget(debug_widget)
+        debug_widget.deleteLater()
+        debug_card.topLayout.addWidget(container, debug_card.stretch)
+        start_tab.debug_widget = container
+        start_tab.debug_layout = wrap
+
+    start_tab._bd2_start_tab_responsive_installed = True
+
+
 def install_live_screenshot(start_tab) -> None:
     if getattr(start_tab, "_bd2_live_screenshot_installed", False):
         return
@@ -395,6 +479,7 @@ def install_live_screenshot(start_tab) -> None:
     side_layout.addWidget(manual_resolution_card, 0)
     side_layout.addStretch(1)
     lower_layout.addWidget(side_column, 1)
+    start_tab._lower_row_switcher = _RowDirectionSwitcher(lower_row, lower_layout)
 
     row_index = tab_layout.indexOf(parent)
     tab_layout.insertWidget(row_index + 1, lower_row, 0)
