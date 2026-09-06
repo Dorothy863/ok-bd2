@@ -87,6 +87,9 @@ PVP_AP_SHORTAGE_PATTERN = r"不足"
 PVP_SEASON_REWARD_AFTER_CLICK_SECONDS = 3.0
 PVP_RANK_PAGE_AFTER_CLICK_SECONDS = 2.0
 PVP_AUTO_BATTLE_MENU_VERIFY_SECONDS = 3.5
+# BUG-20260906-01：网络波动会整枪吞掉点击，自动战斗弹窗内可验证的单发点击
+# 统一按该次数做"点击→确认→失败重试"兜底；确认窗口见各调用点。
+PVP_CLICK_VERIFY_ATTEMPTS = 3
 # A real promotion flow shows the confirm text while the page is still fading
 # in. Waiting for a fresh frame avoids clicking a stale/transient OCR result.
 PVP_RANK_CONFIRM_SETTLE_SECONDS = 1.5
@@ -552,10 +555,10 @@ class PVPTask(BaseBD2Task):
 
         menu_roi = self._mf_roi(*PVP_AUTO_BATTLE_MENU_OCR_REFERENCE_ROI)
         # 2026-09 客户端改版把按钮热区收到图标/背板上（RPT-20260905-201103），
-        # OCR 标签中心点击不再打开弹窗；先点校准图标位，未验证到弹窗再兜底标签中心。
-        found_menu = False
-        menu_text = ""
-        for click_label, click in (
+        # OCR 标签中心点击不再打开弹窗；先点校准图标位，未验证到弹窗再兜底
+        # 标签中心。BUG-20260906-01：网络波动会整枪吞掉点击，两级各一枪仍
+        # 可能全被吞，按 PVP_CLICK_VERIFY_ATTEMPTS 轮流用两种落点重试。
+        auto_battle_clicks = (
             (
                 "图标校准点",
                 lambda: self._click_screen_reference(
@@ -572,11 +575,21 @@ class PVPTask(BaseBD2Task):
                     after_sleep=1.0,
                 ),
             ),
-        ):
+        )
+        found_menu = False
+        menu_text = ""
+        for attempt in range(1, PVP_CLICK_VERIFY_ATTEMPTS + 1):
+            click_label, click = auto_battle_clicks[
+                (attempt - 1) % len(auto_battle_clicks)
+            ]
             clicked = click()
             self.info_set(
                 "PVP 自动战斗点击",
-                click_label if clicked else f"{click_label}（不可用）",
+                (
+                    f"第{attempt}次{click_label}"
+                    if clicked
+                    else f"第{attempt}次{click_label}（不可用）"
+                ),
             )
             found_menu, menu_text = self._wait_for_ocr_patterns(
                 [r"鲜血鸡尾酒"],
@@ -586,9 +599,14 @@ class PVPTask(BaseBD2Task):
             )
             if found_menu:
                 break
+            if attempt < PVP_CLICK_VERIFY_ATTEMPTS:
+                self.log_info(
+                    f"镜中之战：第{attempt}/{PVP_CLICK_VERIFY_ATTEMPTS}次点击"
+                    "自动战斗后未确认菜单，重试。"
+                )
         self.info_set("PVP 自动战斗 OCR", menu_text or "-")
         if not found_menu:
-            self.log_info("镜中之战：两级点击后自动战斗菜单仍未出现。")
+            self.log_info("镜中之战：多次点击后自动战斗菜单仍未出现。")
             self._save_flow_diagnostic("pvp_auto_battle_failed")
             return "failed"
 
@@ -635,14 +653,21 @@ class PVPTask(BaseBD2Task):
 
     def _ensure_free_ap_enabled(self) -> bool:
         self.info_set("当前阶段", "确认仅用免费鸡尾酒")
-        if self._free_ap_switch_on():
-            self.info_set("PVP 免费AP", "已开启")
-            return True
+        # BUG-20260906-01：开关点击被网络吞掉时状态不会翻转，确认失败重试点击。
+        for attempt in range(1, PVP_CLICK_VERIFY_ATTEMPTS + 1):
+            if self._free_ap_switch_on():
+                self.info_set("PVP 免费AP", "已开启")
+                return True
 
-        self._click_screen_reference(*PVP_FREE_AP_SWITCH_SCREEN_POINT, after_sleep=1.0)
-        if self._free_ap_switch_on():
-            self.info_set("PVP 免费AP", "已开启")
-            return True
+            self._click_screen_reference(
+                *PVP_FREE_AP_SWITCH_SCREEN_POINT,
+                after_sleep=1.0,
+            )
+            if attempt < PVP_CLICK_VERIFY_ATTEMPTS:
+                self.log_info(
+                    f"镜中之战：免费AP开关第{attempt}/"
+                    f"{PVP_CLICK_VERIFY_ATTEMPTS}次点击后未确认开启，重试。"
+                )
 
         self.info_set("PVP 免费AP", "未确认")
         self.log_info("镜中之战：未能确认仅用免费鸡尾酒开关。")
@@ -670,34 +695,97 @@ class PVPTask(BaseBD2Task):
         if self._multiplier_matches(multiplier):
             return True
 
-        self._click_screen_reference(*PVP_MULTIPLIER_BUTTON_SCREEN_POINT, after_sleep=0.8)
-        if not self._wait_for_ocr_patterns(
-            [r"设置.*鲜血鸡尾酒.*消耗量|鲜血鸡尾酒.*消耗量"],
-            timeout=8.0,
-            name="PVP 倍率设置",
-            roi=self._mf_roi(*PVP_MULTIPLIER_SETTING_OCR_REFERENCE_ROI),
-        )[0]:
-            self.log_info("镜中之战：未能打开倍率设置。")
+        if not self._open_multiplier_setting():
+            return False
+        if not self._select_setting_multiplier(multiplier):
             return False
 
-        if multiplier == 40:
-            self._click_screen_reference(*PVP_MULTIPLIER_40_OPTION_SCREEN_POINT, after_sleep=0.5)
+        return self._confirm_setting_multiplier(multiplier)
+
+    def _open_multiplier_setting(self) -> bool:
+        # BUG-20260906-01：倍率按钮点击被网络吞掉时设置弹窗不会出现，重试点击。
+        for attempt in range(1, PVP_CLICK_VERIFY_ATTEMPTS + 1):
+            self._click_screen_reference(
+                *PVP_MULTIPLIER_BUTTON_SCREEN_POINT,
+                after_sleep=0.8,
+            )
+            found, _text = self._wait_for_ocr_patterns(
+                [r"设置.*鲜血鸡尾酒.*消耗量|鲜血鸡尾酒.*消耗量"],
+                timeout=8.0,
+                name="PVP 倍率设置",
+                roi=self._mf_roi(*PVP_MULTIPLIER_SETTING_OCR_REFERENCE_ROI),
+            )
+            if found:
+                return True
+            self.log_info(
+                f"镜中之战：第{attempt}/{PVP_CLICK_VERIFY_ATTEMPTS}次点击倍率"
+                "按钮后未打开设置弹窗"
+                + ("，重试。" if attempt < PVP_CLICK_VERIFY_ATTEMPTS else "。")
+            )
+        self.log_info("镜中之战：未能打开倍率设置。")
+        return False
+
+    def _select_setting_multiplier(self, multiplier: int) -> bool:
+        # BUG-20260906-01：选项点击被吞时设置值不变，先重试点击同一选项直到
+        # 回读匹配（重复点击同一选项无副作用），再按原逻辑用加号步进到目标。
+        option_point = (
+            PVP_MULTIPLIER_40_OPTION_SCREEN_POINT
+            if multiplier == 40
+            else PVP_MULTIPLIER_1_OPTION_SCREEN_POINT
+        )
+        option_value = 40 if multiplier == 40 else 1
+        for attempt in range(1, PVP_CLICK_VERIFY_ATTEMPTS + 1):
+            self._click_screen_reference(*option_point, after_sleep=0.5)
+            if self._setting_multiplier_matches(option_value):
+                break
+            self.log_info(
+                f"镜中之战：倍率选项第{attempt}/{PVP_CLICK_VERIFY_ATTEMPTS}"
+                f"次点击后设置值未回读到 {option_value}"
+                + ("，重试。" if attempt < PVP_CLICK_VERIFY_ATTEMPTS else "。")
+            )
         else:
-            self._click_screen_reference(*PVP_MULTIPLIER_1_OPTION_SCREEN_POINT, after_sleep=0.5)
+            self.info_set("PVP 倍率 OCR", "未确认")
+            return False
 
         for _ in range(10):
             if self._setting_multiplier_matches(multiplier):
                 break
             if multiplier == 1:
                 break
-            self._click_screen_reference(*PVP_MULTIPLIER_PLUS_SCREEN_POINT, after_sleep=0.5)
+            self._click_screen_reference(
+                *PVP_MULTIPLIER_PLUS_SCREEN_POINT,
+                after_sleep=0.5,
+            )
 
         if not self._setting_multiplier_matches(multiplier):
             self.info_set("PVP 倍率 OCR", "未确认")
             return False
+        return True
 
-        self._click_screen_reference(*PVP_MULTIPLIER_CONFIRM_SCREEN_POINT, after_sleep=1.0)
-        return self._multiplier_matches(multiplier, timeout=4.0)
+    def _confirm_setting_multiplier(self, multiplier: int) -> bool:
+        # BUG-20260906-01：确认点击被吞时设置弹窗不关、主弹窗回读不变；仅在
+        # 设置弹窗仍开着时重试确认，弹窗已关则不盲重试（避免误点主弹窗）。
+        for attempt in range(1, PVP_CLICK_VERIFY_ATTEMPTS + 1):
+            self._click_screen_reference(
+                *PVP_MULTIPLIER_CONFIRM_SCREEN_POINT,
+                after_sleep=1.0,
+            )
+            if self._multiplier_matches(multiplier, timeout=4.0):
+                return True
+            if attempt >= PVP_CLICK_VERIFY_ATTEMPTS:
+                break
+            dialog_open, _text = self._wait_for_ocr_patterns(
+                [r"设置.*鲜血鸡尾酒.*消耗量|鲜血鸡尾酒.*消耗量"],
+                timeout=1.0,
+                name="PVP 倍率设置",
+                roi=self._mf_roi(*PVP_MULTIPLIER_SETTING_OCR_REFERENCE_ROI),
+            )
+            if not dialog_open:
+                break
+            self.log_info(f"镜中之战：倍率确认第{attempt}次点击未生效，重试。")
+
+        self.info_set("PVP 倍率 OCR", "未确认")
+        return False
 
     def _select_max_battle_count(self) -> None:
         self.info_set("当前阶段", "选择最大战斗次数")

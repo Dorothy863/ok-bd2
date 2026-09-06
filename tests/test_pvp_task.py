@@ -27,13 +27,20 @@ from src.tasks.PVPTask import (
     PVP_AUTO_BATTLE_MENU_VERIFY_SECONDS,
     PVP_AUTO_BATTLE_SCREEN_ROI,
     PVP_BACK_HOME_REFERENCE_POINT,
+    PVP_BATTLE_START_SCREEN_POINT,
     PVP_CARTRIDGE_SLOT_POINT,
+    PVP_CLICK_VERIFY_ATTEMPTS,
     PVP_FAILURE_LEAVE_REFERENCE_ROI,
+    PVP_FREE_AP_SWITCH_SCREEN_POINT,
     PVP_HUB_NOTICE_SCREEN_ROI,
     PVP_HUB_NOTICE_TEMPLATE,
     PVP_HUB_SPECIAL_PAGE_GRACE_SECONDS,
     PVP_LOC_RESET_TEMPLATE,
     PVP_MEDALS_TEMPLATE,
+    PVP_MULTIPLIER_1_OPTION_SCREEN_POINT,
+    PVP_MULTIPLIER_40_OPTION_SCREEN_POINT,
+    PVP_MULTIPLIER_BUTTON_SCREEN_POINT,
+    PVP_MULTIPLIER_CONFIRM_SCREEN_POINT,
     PVP_MULTIPLIER_OCR_REFERENCE_ROI,
     PVP_NO_FIND_TEMPLATES,
     PVP_RANK_CONFIRM_SETTLE_SECONDS,
@@ -2168,6 +2175,93 @@ class PVPTaskHelperTest(unittest.TestCase):
         self.assertEqual("failed", PVPTask._start_auto_battle(task, 1))
         self.assertEqual(["pvp_auto_battle_failed"], diagnostics)
 
+    def test_start_auto_battle_retries_clicks_until_menu_confirmed(self):
+        task = object.__new__(PVPTask)
+        task.config = {}
+        task.info_set = lambda *_args, **_kwargs: None
+        task.log_info = lambda *_args, **_kwargs: None
+        task.log_warning = lambda *_args, **_kwargs: None
+        task._click_template_until = lambda *_args, **_kwargs: True
+        task._ensure_free_ap_enabled = lambda: True
+        task._ensure_multiplier = lambda _multiplier: True
+        task._select_max_battle_count = lambda: None
+        reference_clicks = []
+        task._click_screen_reference = (
+            lambda x, y, after_sleep=0.0: reference_clicks.append((x, y))
+        )
+        auto_clicks = []
+        task._click_ocr_pattern_center = lambda *args, **kwargs: (
+            auto_clicks.append((args, kwargs)) or True
+        )
+        task.capture_frame = lambda: np.zeros((1440, 2560, 3), dtype=np.uint8)
+        task.sleep = lambda *_args, **_kwargs: None
+
+        def fake_ocr_text(_frame, name, roi=None):
+            if name == "PVP 战斗中":
+                return "正在进行"
+            return ""
+
+        task._ocr_text = fake_ocr_text
+        menu_calls = []
+
+        def fake_wait_for_ocr_patterns(_patterns, timeout, name, **_kwargs):
+            if name == "PVP 自动战斗":
+                return True, "自动战斗"
+            if name == "PVP 自动战斗菜单":
+                menu_calls.append(timeout)
+                return (len(menu_calls) >= 3, "鲜血鸡尾酒")
+            return False, ""
+
+        task._wait_for_ocr_patterns = fake_wait_for_ocr_patterns
+        diagnostics = []
+        task._save_flow_diagnostic = diagnostics.append
+
+        self.assertEqual("started", PVPTask._start_auto_battle(task, 1))
+        # BUG-20260906-01：前两次点击被网络吞掉时按 图标校准点→OCR标签中心→
+        # 图标校准点 轮流重试，第三次确认到菜单后照常进入后续流程。
+        self.assertEqual(3, PVP_CLICK_VERIFY_ATTEMPTS)
+        self.assertEqual(3, len(menu_calls))
+        self.assertEqual(
+            [
+                PVP_AUTO_BATTLE_CLICK_REFERENCE,
+                PVP_AUTO_BATTLE_CLICK_REFERENCE,
+                PVP_BATTLE_START_SCREEN_POINT,
+            ],
+            reference_clicks,
+        )
+        self.assertEqual(1, len(auto_clicks))
+        self.assertEqual([], diagnostics)
+
+    def test_start_auto_battle_gives_up_after_retry_budget(self):
+        task = object.__new__(PVPTask)
+        task.config = {}
+        task.info_set = lambda *_args, **_kwargs: None
+        task.log_info = lambda *_args, **_kwargs: None
+        task.log_warning = lambda *_args, **_kwargs: None
+        task._click_template_until = lambda *_args, **_kwargs: True
+        task._click_ocr_pattern_center = lambda *args, **kwargs: True
+        clicks = []
+        task._click_screen_reference = lambda x, y, after_sleep=0.0: clicks.append((x, y))
+        task.capture_frame = lambda: np.zeros((1440, 2560, 3), dtype=np.uint8)
+        task.sleep = lambda *_args, **_kwargs: None
+        menu_calls = []
+
+        def fake_wait_for_ocr_patterns(_patterns, timeout, name, **_kwargs):
+            if name == "PVP 自动战斗":
+                return True, "自动战斗"
+            if name == "PVP 自动战斗菜单":
+                menu_calls.append(timeout)
+            return False, ""
+
+        task._wait_for_ocr_patterns = fake_wait_for_ocr_patterns
+        diagnostics = []
+        task._save_flow_diagnostic = diagnostics.append
+
+        self.assertEqual("failed", PVPTask._start_auto_battle(task, 1))
+        self.assertEqual(PVP_CLICK_VERIFY_ATTEMPTS, len(menu_calls))
+        self.assertEqual([PVP_AUTO_BATTLE_CLICK_REFERENCE] * 2, clicks)
+        self.assertEqual(["pvp_auto_battle_failed"], diagnostics)
+
     def test_wait_for_pvp_hub_timeout_saves_failure_diagnostic(self):
         task = object.__new__(PVPTask)
         task.info_set = lambda *_args, **_kwargs: None
@@ -2218,6 +2312,203 @@ class PVPTaskHelperTest(unittest.TestCase):
         self.assertEqual("failed", PVPTask._start_auto_battle(task, 10))
         self.assertEqual([10], multiplier_calls)
         self.assertNotIn((1381, 1061, 2.0), clicks)
+
+    def test_ensure_free_ap_enabled_retries_click_until_switch_turns_on(self):
+        task = object.__new__(PVPTask)
+        task.info_set = lambda *_args, **_kwargs: None
+        task.log_info = lambda *_args, **_kwargs: None
+        switch = {"on": False, "clicks": 0}
+
+        def fake_click(x, y, after_sleep=0.0):
+            switch["clicks"] += 1
+            if switch["clicks"] >= 2:
+                switch["on"] = True
+
+        task._free_ap_switch_on = lambda: switch["on"]
+        task._click_screen_reference = fake_click
+
+        self.assertTrue(PVPTask._ensure_free_ap_enabled(task))
+        self.assertEqual(2, switch["clicks"])
+
+    def test_ensure_free_ap_enabled_fails_after_retry_budget(self):
+        task = object.__new__(PVPTask)
+        task.info_set = lambda *_args, **_kwargs: None
+        task.log_info = lambda *_args, **_kwargs: None
+        task._free_ap_switch_on = lambda: False
+        clicks = []
+        task._click_screen_reference = lambda x, y, after_sleep=0.0: clicks.append((x, y))
+
+        self.assertFalse(PVPTask._ensure_free_ap_enabled(task))
+        self.assertEqual(
+            [PVP_FREE_AP_SWITCH_SCREEN_POINT] * PVP_CLICK_VERIFY_ATTEMPTS,
+            clicks,
+        )
+
+    def _make_multiplier_harness(self, swallow_button=False, swallow_option=False):
+        task = object.__new__(PVPTask)
+        task.config = {}
+        task.info_set = lambda *_args, **_kwargs: None
+        task.log_info = lambda *_args, **_kwargs: None
+        state = {"clicks": [], "dialog_open": False, "setting": 40, "main": 40}
+
+        def fake_click(x, y, after_sleep=0.0):
+            state["clicks"].append((x, y))
+            if (x, y) == PVP_MULTIPLIER_BUTTON_SCREEN_POINT:
+                needed = 2 if swallow_button else 1
+                state["dialog_open"] = state["clicks"].count((x, y)) >= needed
+            elif (x, y) == PVP_MULTIPLIER_1_OPTION_SCREEN_POINT:
+                needed = 2 if swallow_option else 1
+                if state["clicks"].count((x, y)) >= needed:
+                    state["setting"] = 1
+            elif (x, y) == PVP_MULTIPLIER_CONFIRM_SCREEN_POINT:
+                state["main"] = state["setting"]
+
+        task._click_screen_reference = fake_click
+        task._multiplier_matches = (
+            lambda multiplier, timeout=2.0: state["main"] == multiplier
+        )
+        task._setting_multiplier_matches = (
+            lambda multiplier: state["dialog_open"] and state["setting"] == multiplier
+        )
+        task._wait_for_ocr_patterns = lambda *args, **kwargs: (
+            state["dialog_open"],
+            "设置鲜血鸡尾酒消耗量",
+        )
+        return task, state
+
+    def test_ensure_multiplier_one_confirms_with_single_clicks_when_landing(self):
+        task, state = self._make_multiplier_harness()
+
+        self.assertTrue(PVPTask._ensure_multiplier(task, 1))
+        self.assertEqual(
+            [
+                PVP_MULTIPLIER_BUTTON_SCREEN_POINT,
+                PVP_MULTIPLIER_1_OPTION_SCREEN_POINT,
+                PVP_MULTIPLIER_CONFIRM_SCREEN_POINT,
+            ],
+            state["clicks"],
+        )
+
+    def test_ensure_multiplier_recovers_from_swallowed_button_and_option_clicks(self):
+        task, state = self._make_multiplier_harness(
+            swallow_button=True,
+            swallow_option=True,
+        )
+
+        self.assertTrue(PVPTask._ensure_multiplier(task, 1))
+        self.assertEqual(
+            2,
+            state["clicks"].count(PVP_MULTIPLIER_BUTTON_SCREEN_POINT),
+        )
+        self.assertEqual(
+            2,
+            state["clicks"].count(PVP_MULTIPLIER_1_OPTION_SCREEN_POINT),
+        )
+
+    def test_open_multiplier_setting_fails_after_retry_budget(self):
+        task = object.__new__(PVPTask)
+        task.info_set = lambda *_args, **_kwargs: None
+        logs = []
+        task.log_info = logs.append
+        clicks = []
+        task._click_screen_reference = lambda x, y, after_sleep=0.0: clicks.append((x, y))
+        task._wait_for_ocr_patterns = lambda *args, **kwargs: (False, "")
+
+        self.assertFalse(PVPTask._open_multiplier_setting(task))
+        self.assertEqual(
+            [PVP_MULTIPLIER_BUTTON_SCREEN_POINT] * PVP_CLICK_VERIFY_ATTEMPTS,
+            clicks,
+        )
+        self.assertEqual("镜中之战：未能打开倍率设置。", logs[-1])
+
+    def test_select_setting_multiplier_reclicks_option_until_value_matches(self):
+        task = object.__new__(PVPTask)
+        task.info_set = lambda *_args, **_kwargs: None
+        task.log_info = lambda *_args, **_kwargs: None
+        state = {"clicks": [], "setting": 40}
+
+        def fake_click(x, y, after_sleep=0.0):
+            state["clicks"].append((x, y))
+            if len(state["clicks"]) >= 2:
+                state["setting"] = 1
+
+        task._click_screen_reference = fake_click
+        task._setting_multiplier_matches = lambda value: state["setting"] == value
+
+        self.assertTrue(PVPTask._select_setting_multiplier(task, 1))
+        self.assertEqual(
+            [PVP_MULTIPLIER_1_OPTION_SCREEN_POINT] * 2,
+            state["clicks"],
+        )
+
+    def test_select_setting_multiplier_uses_40_option_for_multiplier_40(self):
+        task = object.__new__(PVPTask)
+        task.info_set = lambda *_args, **_kwargs: None
+        task.log_info = lambda *_args, **_kwargs: None
+        state = {"clicks": [], "setting": 1}
+
+        def fake_click(x, y, after_sleep=0.0):
+            state["clicks"].append((x, y))
+            state["setting"] = 40
+
+        task._click_screen_reference = fake_click
+        task._setting_multiplier_matches = lambda value: state["setting"] == value
+
+        self.assertTrue(PVPTask._select_setting_multiplier(task, 40))
+        self.assertEqual([PVP_MULTIPLIER_40_OPTION_SCREEN_POINT], state["clicks"])
+
+    def test_select_setting_multiplier_fails_after_retry_budget(self):
+        task = object.__new__(PVPTask)
+        infos = {}
+        task.info_set = lambda key, value: infos.__setitem__(key, value)
+        task.log_info = lambda *_args, **_kwargs: None
+        clicks = []
+        task._click_screen_reference = lambda x, y, after_sleep=0.0: clicks.append((x, y))
+        task._setting_multiplier_matches = lambda value: False
+
+        self.assertFalse(PVPTask._select_setting_multiplier(task, 1))
+        self.assertEqual(
+            [PVP_MULTIPLIER_1_OPTION_SCREEN_POINT] * PVP_CLICK_VERIFY_ATTEMPTS,
+            clicks,
+        )
+        self.assertEqual("未确认", infos["PVP 倍率 OCR"])
+
+    def test_confirm_setting_multiplier_retries_while_dialog_open(self):
+        task = object.__new__(PVPTask)
+        task.info_set = lambda *_args, **_kwargs: None
+        task.log_info = lambda *_args, **_kwargs: None
+        state = {"clicks": [], "landed": False}
+
+        def fake_click(x, y, after_sleep=0.0):
+            state["clicks"].append((x, y))
+            state["landed"] = len(state["clicks"]) >= 2
+
+        task._click_screen_reference = fake_click
+        task._multiplier_matches = lambda multiplier, timeout=2.0: state["landed"]
+        task._wait_for_ocr_patterns = lambda *args, **kwargs: (
+            not state["landed"],
+            "设置鲜血鸡尾酒消耗量",
+        )
+
+        self.assertTrue(PVPTask._confirm_setting_multiplier(task, 4))
+        self.assertEqual(
+            [PVP_MULTIPLIER_CONFIRM_SCREEN_POINT] * 2,
+            state["clicks"],
+        )
+
+    def test_confirm_setting_multiplier_does_not_blind_retry_after_dialog_closes(self):
+        task = object.__new__(PVPTask)
+        infos = {}
+        task.info_set = lambda key, value: infos.__setitem__(key, value)
+        task.log_info = lambda *_args, **_kwargs: None
+        clicks = []
+        task._click_screen_reference = lambda x, y, after_sleep=0.0: clicks.append((x, y))
+        task._multiplier_matches = lambda multiplier, timeout=2.0: False
+        task._wait_for_ocr_patterns = lambda *args, **kwargs: (False, "")
+
+        self.assertFalse(PVPTask._confirm_setting_multiplier(task, 4))
+        self.assertEqual([PVP_MULTIPLIER_CONFIRM_SCREEN_POINT], clicks)
+        self.assertEqual("未确认", infos["PVP 倍率 OCR"])
 
     def _make_free_ap_task(self, frame):
         harness = SimpleNamespace(infos={}, logs=[])
