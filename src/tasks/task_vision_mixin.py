@@ -319,6 +319,7 @@ class TaskVisionMixin:
         name: str,
         interval: float = 0.35,
         timeout: float | None = None,
+        auto_return: bool = True,
     ) -> bool:
         if timeout is None:
             timeout = float(self.config.get("主页确认等待秒数", 10.0))
@@ -344,6 +345,11 @@ class TaskVisionMixin:
             )
             self.info_set(f"{name} 抽抽乐 OCR", last_gacha_text or "-")
             if confirmed:
+                # 返回主页/确认主页后，转场动画仍在进行，立刻点击会被吞
+                # （BUG-20260905：小屋/收菜入口点击被吞）。确认后再稳定等待几秒。
+                settle = float(self.config.get("主页确认后稳定等待秒数", 6.0))
+                if settle > 0:
+                    self.sleep(settle)
                 return True
             self.clear_temporary_home_announcement_if_needed(
                 left_hits=last_left_hits,
@@ -355,12 +361,36 @@ class TaskVisionMixin:
             )
             self.sleep(interval)
 
+        if auto_return:
+            return self._auto_return_home_after_timeout(name, interval=interval)
+
         self.log_info(
             f"{name}：未同时确认左列关键词、亮度和抽抽乐文字，"
             f"left={last_left_hits}/{HOME_LEFT_COLUMN_REQUIRED_HITS}, "
             f"p95={last_p95:.0f}/{self._home_p95_threshold():.0f}, "
             f"ocr={last_gacha_text or '-'}。"
         )
+        return False
+
+    def _auto_return_home_after_timeout(
+        self,
+        name: str,
+        interval: float = 0.35,
+    ) -> bool:
+        """主页确认超时后，自动点击右上角主页按钮把角色带回主页面再确认。"""
+        tries = int(self.config.get("主页确认自动返回主页次数", 2))
+        self.log_info(
+            f"{name}：未确认到主页，尝试自动点击返回主页按钮（最多 {tries} 次）。"
+        )
+        for _ in range(tries):
+            self.attempt_return_home(name=f"{name} 自动返回主页")
+            if self._wait_for_home_confirmation(
+                name,
+                interval=interval,
+                timeout=float(self.config.get("主页确认等待秒数", 10.0)),
+                auto_return=False,
+            ):
+                return True
         return False
 
     @staticmethod
