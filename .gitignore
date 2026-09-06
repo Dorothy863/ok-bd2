@@ -1,6 +1,8 @@
 # Local secrets and runtime data
 /AGENTS.md
 /CLAUDE.md
+# 代码质量优化计划：本地辅助文档（2026-09-06 用户决定不入库）
+/docs/code-quality-optimization-plan.md
 /.agents/
 /intro/
 my_key.txt
