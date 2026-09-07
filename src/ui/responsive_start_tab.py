@@ -53,15 +53,15 @@ class StartCardResponsiveController:
         self.buttons = (card.capture_button, card.refresh_button, card.start_button)
         self.status_bar = card.status_bar
         self.icon_label = card.iconLabel
-        self.vbox_layout = card.vBoxLayout
         self.header = card.hBoxLayout
 
-        for widget in (self.icon_label, self.status_bar, *self.buttons):
-            self.header.removeWidget(widget)
-        self.header.removeItem(self.vbox_layout)
+        # 清空原卡片布局，准备自适应容器
         while self.header.count():
             item = self.header.takeAt(0)
             del item
+
+        self.header.setContentsMargins(0, 0, 0, 0)
+        self.header.setSpacing(0)
 
         for label in (card.titleLabel, card.contentLabel):
             policy = label.sizePolicy()
@@ -69,37 +69,44 @@ class StartCardResponsiveController:
             label.setSizePolicy(policy)
             label.setMinimumWidth(0)
 
-        self.root_widget = QWidget()
+        # 标题与版本号放入专属容器，避免在布局间跨父级转移 QLayout
+        self.title_widget = QWidget(card)
+        self.title_layout = QVBoxLayout(self.title_widget)
+        self.title_layout.setContentsMargins(0, 0, 0, 0)
+        self.title_layout.setSpacing(2)
+        self.title_layout.setAlignment(Qt.AlignVCenter | Qt.AlignLeft)
+        self.title_layout.addWidget(card.titleLabel)
+        self.title_layout.addWidget(card.contentLabel)
+
+        # 顶层容器
+        self.root_widget = QWidget(card)
         self.root_layout = QVBoxLayout(self.root_widget)
-        self.root_layout.setContentsMargins(0, 0, 0, 0)
-        self.root_layout.setSpacing(0)
+        self.root_layout.setContentsMargins(16, 0, 20, 0)
+        self.root_layout.setSpacing(4)
 
-        # 单行布局容器
-        self.single_widget = QWidget()
-        self.single_layout = QHBoxLayout(self.single_widget)
-        self.single_layout.setContentsMargins(0, 0, 20, 0)
-        self.single_layout.setSpacing(6)
+        # 第 1 行：图标 + 标题/版本号 + 状态条 + 伸缩空白（单行模式时三个按钮排在此行）
+        self.row1_widget = QWidget(self.root_widget)
+        self.row1_layout = QHBoxLayout(self.row1_widget)
+        self.row1_layout.setContentsMargins(0, 0, 0, 0)
+        self.row1_layout.setSpacing(16)
+        self.row1_layout.setAlignment(Qt.AlignVCenter)
+        self.row1_layout.addWidget(self.icon_label, 0, Qt.AlignVCenter)
+        self.row1_layout.addWidget(self.title_widget, 0, Qt.AlignVCenter)
+        self.row1_layout.addWidget(self.status_bar, 0, Qt.AlignVCenter)
+        self.row1_layout.addStretch(1)
 
-        # 双行布局容器
-        self.double_widget = QWidget()
-        self.double_layout = QVBoxLayout(self.double_widget)
-        self.double_layout.setContentsMargins(0, 8, 20, 8)
-        self.double_layout.setSpacing(6)
+        # 第 2 行：窄屏折行模式时容纳右对齐的三个操作按钮（流式布局，保证超窄时不溢出）
+        self.row2_widget = QWidget(self.root_widget)
+        self.row2_layout = WrappingFlowLayout(
+            self.row2_widget, spacing=6, alignment=Qt.AlignRight | Qt.AlignVCenter
+        )
 
-        self.double_row1 = QHBoxLayout()
-        self.double_row1.setContentsMargins(0, 0, 0, 0)
-        self.double_row1.setSpacing(16)
-
-        self.double_row2 = WrappingFlowLayout(spacing=6, alignment=Qt.AlignRight | Qt.AlignVCenter)
-        self.double_layout.addLayout(self.double_row1)
-        self.double_layout.addLayout(self.double_row2)
-
-        self.root_layout.addWidget(self.single_widget)
-        self.root_layout.addWidget(self.double_widget)
+        self.root_layout.addWidget(self.row1_widget)
+        self.root_layout.addWidget(self.row2_widget)
         self.header.addWidget(self.root_widget, 1)
 
         _enable_height_for_width(self.root_widget)
-        _enable_height_for_width(self.double_widget)
+        _enable_height_for_width(self.row2_widget)
         _enable_height_for_width(self.card)
 
         self.card_policy = card.sizePolicy()
@@ -137,26 +144,19 @@ class StartCardResponsiveController:
         self.current_mode = mode
 
         if mode == "single":
-            self.double_widget.hide()
-            self.single_layout.addWidget(self.icon_label, 0, Qt.AlignVCenter)
-            self.single_layout.addSpacing(16)
-            self.single_layout.addLayout(self.vbox_layout)
-            self.single_layout.addSpacing(16)
-            self.single_layout.addWidget(self.status_bar, 0, Qt.AlignVCenter)
-            self.single_layout.addStretch(1)
+            self.row2_widget.hide()
             for b in self.buttons:
-                self.single_layout.addWidget(b, 0, Qt.AlignVCenter)
-            self.single_widget.show()
+                self.row2_layout.removeWidget(b)
+                self.row1_layout.addWidget(b, 0, Qt.AlignVCenter)
+                b.show()
             self.card.setMinimumHeight(70)
             self.card.setMaximumHeight(70)
         else:
-            self.single_widget.hide()
-            self.double_row1.addWidget(self.icon_label, 0, Qt.AlignVCenter)
-            self.double_row1.addLayout(self.vbox_layout, 1)
-            self.double_row1.addWidget(self.status_bar, 0, Qt.AlignVCenter | Qt.AlignRight)
             for b in self.buttons:
-                self.double_row2.addWidget(b)
-            self.double_widget.show()
+                self.row1_layout.removeWidget(b)
+                self.row2_layout.addWidget(b)
+                b.show()
+            self.row2_widget.show()
             self.card.setMinimumHeight(0)
             self.card.setMaximumHeight(_QWIDGETSIZE_MAX)
             self.card.adjustSize()
