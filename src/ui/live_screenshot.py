@@ -10,7 +10,7 @@ from PySide6.QtWidgets import QBoxLayout, QHBoxLayout, QLabel, QSizePolicy, QVBo
 from qfluentwidgets import CaptionLabel
 
 PREVIEW_INTERVAL_MS = 50
-PREVIEW_MIN_WIDTH = 272
+PREVIEW_MIN_WIDTH = 240
 PREVIEW_ASPECT_WIDTH = 16
 PREVIEW_ASPECT_HEIGHT = 9
 TOP_ROW_MAX_HEIGHT = 240
