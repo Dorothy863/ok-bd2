@@ -2,21 +2,25 @@ from __future__ import annotations
 
 import re
 from collections import Counter
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from enum import Enum
+from pathlib import Path
 from time import monotonic
 
 from src.tasks.map_trade.action_icons import COOKING_ICON, SKILL_GROUP_CENTERS_REFERENCE
 from src.tasks.map_trade.models import (
-    DEFAULT_RECIPES,
+    COOKING_RECIPE_TEMPLATES,
+    DEFAULT_COOKING_RECIPES,
+    FINAL_COOKING_RECIPE,
     MERCHANT_CARD_ID,
-    RECIPE_TEMPLATES,
+    OPTIONAL_COOKING_RECIPES,
     MatchResult,
     TemplateSpec,
 )
 from src.tasks.map_trade.trader_constants import COOK_SUBMENU_TEMPLATE, split_items
 from src.tasks.map_trade.vision import normalize_text
 from src.utils.calibration import FHD_1080
+from src.utils.image_utils import to_gray
 
 # The supplied 1920x1080 PC recording shows the complete recipe grid on one
 # page.  Every fixed control below is stored as a ratio; recipe and action
@@ -96,19 +100,29 @@ COOKING_ICON_CLICK_TIMEOUT = 6.0
 COOKING_QUANTITY_CLICK_SETTLE_SECONDS = 0.25
 COOKING_EXIT_TIMEOUT = 12.0
 COOKING_POLL_INTERVAL = 0.25
+COOKING_MAX_CHOICE = "MAX"
 
 COOKING_RECIPE_SPECS = {
     recipe: TemplateSpec(
         f"料理-{recipe}",
-        RECIPE_TEMPLATES[recipe],
+        COOKING_RECIPE_TEMPLATES[recipe],
         COOKING_RECIPE_TEMPLATE_SCORE,
         relative_roi=COOKING_LIST_GRID_ROI,
         scale_ratios=(0.95, 1.0, 1.05),
         min_pixel_score=COOKING_RECIPE_PIXEL_SCORE,
         minimum_safe_threshold=COOKING_RECIPE_TEMPLATE_SCORE,
     )
-    for recipe in DEFAULT_RECIPES
+    for recipe in COOKING_RECIPE_TEMPLATES
 }
+# Identity must survive the disabled card's dark overlay.  Brightness is
+# evaluated separately so a recognized disabled recipe can be skipped.
+COOKING_IDENTITY_SPECS = {
+    recipe: replace(spec, min_pixel_score=None, min_zncc_score=0.85)
+    for recipe, spec in COOKING_RECIPE_SPECS.items()
+}
+COOKING_TEMPLATE_DIR = (
+    Path(__file__).resolve().parents[3] / "recognition-assets" / "template-assets"
+)
 COOKING_DETAIL_TEMPLATE = TemplateSpec(
     "料理详情开始控件",
     COOK_SUBMENU_TEMPLATE.file_name,
@@ -171,7 +185,6 @@ class CookingFlowMixin:
     """Mouse-only Q_sp6 cooking flow proven one state transition at a time."""
 
     def run_cooking(self) -> bool:
-        every_run = str(self.task.config.get("料理制作周期", "每周")) == "每次"
         selected = self._selected_cooking_recipes()
         if not selected:
             self.task.log_info("料理：未选择料理，跳过制作。")
@@ -184,21 +197,21 @@ class CookingFlowMixin:
             self.task.log_warning(f"料理：配置包含不支持的料理：{'、'.join(unsupported)}。")
             return False
 
-        if not self.progress.should_cook(every_run=every_run, recipes=selected):
-            self.task.log_info("料理：本周所选料理均已完成，跳过制作。")
-            return True
-        pending = (
-            selected
-            if every_run
-            else tuple(
-                recipe
-                for recipe in selected
-                if not self.progress.cooking_recipe_complete(recipe)
-            )
+        missing_templates = tuple(
+            recipe
+            for recipe in selected
+            if not (
+                COOKING_TEMPLATE_DIR / COOKING_RECIPE_SPECS[recipe].file_name
+            ).is_file()
         )
-        if not pending:
-            self.task.log_info("料理：没有待制作的料理。")
-            return True
+        if missing_templates:
+            self.task.log_warning(
+                "料理：缺少配方模板，暂不执行本轮："
+                f"{'、'.join(missing_templates)}。"
+            )
+            return False
+
+        pending = selected
 
         self._cooking_opened = False
         flow_success = False
@@ -207,11 +220,9 @@ class CookingFlowMixin:
         try:
             if self._enter_cooking_list():
                 flow_success = True
-                insurance = bool(self.task.config.get("料理保险", True))
                 for recipe in pending:
-                    outcome = self._cook_one_recipe(recipe, insurance=insurance)
+                    outcome = self._cook_one_recipe(recipe)
                     if outcome is CookingRecipeOutcome.COOKED:
-                        self.progress.mark_cooking_recipe_complete(recipe)
                         cooked.append(recipe)
                         self._status("料理进度", f"已完成：{'、'.join(cooked)}")
                         continue
@@ -237,13 +248,14 @@ class CookingFlowMixin:
         return flow_success
 
     def _selected_cooking_recipes(self) -> tuple[str, ...]:
-        raw = self.task.config.get("5星料理", list(DEFAULT_RECIPES))
+        raw = self.task.config.get("5星料理", [])
         values = (
             split_items(raw)
             if isinstance(raw, str)
             else split_items(tuple(raw or ()))
         )
-        return tuple(dict.fromkeys(values))
+        optional = tuple(recipe for recipe in OPTIONAL_COOKING_RECIPES if recipe in values)
+        return (*DEFAULT_COOKING_RECIPES, *optional, FINAL_COOKING_RECIPE)
 
     def _enter_cooking_list(self) -> bool:
         entered = self.navigator.select_trade_card(MERCHANT_CARD_ID)
@@ -274,19 +286,24 @@ class CookingFlowMixin:
     def _cook_one_recipe(
         self,
         recipe: str,
-        *,
-        insurance: bool,
     ) -> CookingRecipeOutcome:
         list_snapshot = self._wait_for_cooking_list(2.0)
         if list_snapshot is None:
             self.task.log_warning(f"料理：选择 {recipe} 前料理列表未确认。")
             return CookingRecipeOutcome.FAILED
 
-        spec = COOKING_RECIPE_SPECS[recipe]
+        spec = COOKING_IDENTITY_SPECS[recipe]
         recipe_match = self.vision.match(list_snapshot.frame, spec)
         if not self.vision.passes(recipe_match, spec):
             self.task.log_warning(f"料理：一页料理列表中未识别到 {recipe}。")
             return CookingRecipeOutcome.FAILED
+        enabled = self._cooking_card_enabled(list_snapshot.frame, recipe_match)
+        if enabled is None:
+            self.task.log_warning(f"料理：{recipe} 图标亮度状态不明确。")
+            return CookingRecipeOutcome.FAILED
+        if not enabled:
+            self.task.log_info(f"料理：{recipe} 列表图标变灰，跳过。")
+            return CookingRecipeOutcome.UNAVAILABLE
         self._status(
             f"料理-{recipe}点击中心",
             (
@@ -307,7 +324,7 @@ class CookingFlowMixin:
                 return CookingRecipeOutcome.FAILED
             return CookingRecipeOutcome.UNAVAILABLE
 
-        quantity = "MIN" if insurance else "MAX"
+        quantity = COOKING_MAX_CHOICE
         if not self._click_quantity_choice(recipe, quantity):
             self.task.log_warning(f"料理：{recipe} 未识别到数量选项 {quantity}。")
             self._recover_cooking_list()
@@ -357,7 +374,9 @@ class CookingFlowMixin:
     def _cooking_list_snapshot(self, frame=None) -> CookingListSnapshot | None:
         frame = self.vision.capture() if frame is None else frame
         candidates: list[MatchResult] = []
-        for spec in COOKING_RECIPE_SPECS.values():
+        for spec in COOKING_IDENTITY_SPECS.values():
+            if not (COOKING_TEMPLATE_DIR / spec.file_name).is_file():
+                continue
             result = self.vision.match(frame, spec)
             if self.vision.passes(result, spec):
                 candidates.append(result)
@@ -372,6 +391,26 @@ class CookingFlowMixin:
         if "料理" not in normalize_text(self.vision.simplify(header)):
             return None
         return CookingListSnapshot(frame, max(candidates, key=lambda result: result.score))
+
+    @staticmethod
+    def _cooking_card_enabled(frame, match: MatchResult) -> bool | None:
+        x, y = match.position
+        width, height = match.size
+        gray = to_gray(frame)
+        if width <= 0 or height <= 0 or x < 0 or y < 0:
+            return None
+        card = gray[y:y + height, x:x + width]
+        if card.shape != (height, width):
+            return None
+        # The beige card background is shared across dishes, including dark
+        # food icons.  Sample its left strip, outside the food and star art.
+        strip = card[height // 4:3 * height // 4, :max(1, width // 12)]
+        brightness = float(strip.mean())
+        if brightness <= 85:
+            return False
+        if brightness >= 115:
+            return True
+        return None
 
     def _wait_for_cooking_detail(
         self,
@@ -500,10 +539,6 @@ class CookingFlowMixin:
         end_at = monotonic() + max(0.0, timeout)
         while True:
             frame = self.vision.capture()
-            detail = self._cooking_detail_snapshot(recipe, frame)
-            if detail is not None and not detail.enabled:
-                self._status("料理状态", f"{recipe} 制作已开始")
-                return True
             text = self.vision.ocr_text(
                 frame,
                 f"料理-{recipe}制作中",

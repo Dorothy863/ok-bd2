@@ -8,7 +8,9 @@ import numpy as np
 
 from src.tasks.map_trade.action_icons import COOKING_ICON
 from src.tasks.map_trade.models import (
+    DEFAULT_COOKING_RECIPES,
     DEFAULT_RECIPES,
+    FINAL_COOKING_RECIPE,
     MERCHANT_CARD_ID,
     MatchResult,
     NavigationResult,
@@ -86,6 +88,7 @@ class CookingFlowTest(unittest.TestCase):
         trader = object.__new__(Trader)
         trader.task = task
         trader.progress = progress
+        trader._selected_cooking_recipes = lambda: tuple(selected)
         calls = []
 
         def enter():
@@ -95,34 +98,36 @@ class CookingFlowTest(unittest.TestCase):
 
         pending_outcomes = iter(outcomes)
         trader._enter_cooking_list = enter
-        trader._cook_one_recipe = lambda recipe, insurance: (
-            calls.append(("cook", recipe, insurance)) or next(pending_outcomes)
+        trader._cook_one_recipe = lambda recipe: (
+            calls.append(("cook", recipe)) or next(pending_outcomes)
         )
         trader._leave_cooking_to_q_sp6 = lambda: calls.append("exit") or exit_ok
         return trader, progress, calls
 
-    def test_weekly_flow_resumes_only_pending_recipes_and_keeps_unavailable_retryable(self):
+    def test_each_run_cooks_again_and_keeps_unavailable_retryable(self):
         first, second, third = DEFAULT_RECIPES[:3]
         trader, progress, calls = self._orchestrated_trader(
             selected=(first, second, third),
             completed=(first,),
-            outcomes=(CookingRecipeOutcome.COOKED, CookingRecipeOutcome.UNAVAILABLE),
+            outcomes=(CookingRecipeOutcome.COOKED, CookingRecipeOutcome.COOKED,
+                      CookingRecipeOutcome.UNAVAILABLE),
         )
 
         self.assertTrue(trader.run_cooking())
-        self.assertEqual([second], progress.marked)
+        self.assertEqual([], progress.marked)
         self.assertEqual(
             [
                 "enter",
-                ("cook", second, True),
-                ("cook", third, True),
+                ("cook", first),
+                ("cook", second),
+                ("cook", third),
                 "exit",
             ],
             calls,
         )
         self.assertNotIn(third, progress.completed)
 
-    def test_partial_failure_persists_proven_recipe_and_stops_later_recipes(self):
+    def test_partial_failure_stops_later_recipes(self):
         first, second, third = DEFAULT_RECIPES[:3]
         trader, progress, calls = self._orchestrated_trader(
             selected=(first, second, third),
@@ -130,12 +135,12 @@ class CookingFlowTest(unittest.TestCase):
         )
 
         self.assertFalse(trader.run_cooking())
-        self.assertEqual([first], progress.marked)
+        self.assertEqual([], progress.marked)
         self.assertEqual(
             [
                 "enter",
-                ("cook", first, True),
-                ("cook", second, True),
+                ("cook", first),
+                ("cook", second),
                 "exit",
             ],
             calls,
@@ -149,17 +154,25 @@ class CookingFlowTest(unittest.TestCase):
         )
 
         self.assertFalse(trader.run_cooking())
-        self.assertEqual([DEFAULT_RECIPES[0]], progress.marked)
+        self.assertEqual([], progress.marked)
         self.assertEqual("exit", calls[-1])
 
-    def test_completed_selected_recipes_skip_navigation(self):
-        recipe = DEFAULT_RECIPES[0]
+    def test_default_order_optional_selection_and_chicken_last(self):
         trader = object.__new__(Trader)
-        trader.task = CookingTask(**{"5星料理": [recipe]})
-        trader.progress = CookingProgress((recipe,))
-        trader._enter_cooking_list = lambda: self.fail("navigation must be skipped")
+        trader.task = CookingTask(**{"5星料理": []})
+        self.assertEqual((*DEFAULT_COOKING_RECIPES, FINAL_COOKING_RECIPE),
+                         trader._selected_cooking_recipes())
+        trader.task.config["5星料理"] = [DEFAULT_RECIPES[1], DEFAULT_RECIPES[0]]
+        self.assertEqual((*DEFAULT_COOKING_RECIPES, *DEFAULT_RECIPES[:2],
+                          FINAL_COOKING_RECIPE), trader._selected_cooking_recipes())
 
-        self.assertTrue(trader.run_cooking())
+    def test_missing_templates_stop_before_navigation(self):
+        trader = object.__new__(Trader)
+        trader.task = CookingTask(**{"5星料理": []})
+        trader._enter_cooking_list = lambda: self.fail("missing assets must stop navigation")
+        from unittest.mock import patch
+        with patch("pathlib.Path.is_file", return_value=False):
+            self.assertFalse(trader.run_cooking())
 
     def test_entry_uses_relative_skill_group_two_and_detected_cooking_icon(self):
         task = CookingTask()
@@ -206,6 +219,7 @@ class CookingFlowTest(unittest.TestCase):
         trader = object.__new__(Trader)
         trader.task = task
         trader.vision = vision
+        trader._cooking_card_enabled = lambda *_args: True
         trader._wait_for_cooking_list = lambda _timeout: (
             events.append("list confirmed") or CookingListSnapshot(frame, recipe_match)
         )
@@ -230,7 +244,7 @@ class CookingFlowTest(unittest.TestCase):
 
         self.assertIs(
             CookingRecipeOutcome.COOKED,
-            trader._cook_one_recipe(recipe, insurance=False),
+            trader._cook_one_recipe(recipe),
         )
         self.assertLess(events.index("quantity MAX"), events.index("start recognized"))
         self.assertLess(events.index("animation started"), events.index("result confirmed"))
@@ -248,6 +262,7 @@ class CookingFlowTest(unittest.TestCase):
         )
         trader = object.__new__(Trader)
         trader.task = CookingTask()
+        trader._cooking_card_enabled = lambda *_args: True
         trader.vision = SimpleNamespace(
             match=lambda *_args: recipe_match,
             passes=lambda *_args: True,
@@ -265,7 +280,7 @@ class CookingFlowTest(unittest.TestCase):
 
         self.assertIs(
             CookingRecipeOutcome.UNAVAILABLE,
-            trader._cook_one_recipe(recipe, insurance=False),
+            trader._cook_one_recipe(recipe),
         )
 
     def test_result_timeout_is_failure_not_success(self):
@@ -276,6 +291,7 @@ class CookingFlowTest(unittest.TestCase):
         recovered = []
         trader = object.__new__(Trader)
         trader.task = CookingTask()
+        trader._cooking_card_enabled = lambda *_args: True
         trader.vision = SimpleNamespace(
             match=lambda *_args: match,
             passes=lambda *_args: True,
@@ -291,9 +307,34 @@ class CookingFlowTest(unittest.TestCase):
 
         self.assertIs(
             CookingRecipeOutcome.FAILED,
-            trader._cook_one_recipe(recipe, insurance=True),
+            trader._cook_one_recipe(recipe),
         )
         self.assertEqual([True], recovered)
+
+    def test_gray_card_skips_without_clicking_or_opening_detail(self):
+        recipe = DEFAULT_RECIPES[0]
+        frame = np.full((1080, 1920, 3), 60, dtype=np.uint8)
+        match = MatchResult(0.97, (1000, 650), (96, 96), zncc_score=0.97)
+        trader = object.__new__(Trader)
+        trader.task = CookingTask()
+        trader.vision = SimpleNamespace(
+            match=lambda *_args: match,
+            passes=lambda *_args: True,
+            click_client=lambda *_args, **_kwargs: self.fail("gray card must not be clicked"),
+        )
+        trader._wait_for_cooking_list = lambda _: CookingListSnapshot(frame, match)
+        self.assertIs(CookingRecipeOutcome.UNAVAILABLE, trader._cook_one_recipe(recipe))
+
+    def test_disabled_button_alone_does_not_prove_cooking_started(self):
+        frame = np.zeros((1080, 1920, 3), dtype=np.uint8)
+        trader = object.__new__(Trader)
+        trader.task = CookingTask()
+        trader.vision = SimpleNamespace(
+            capture=lambda: frame,
+            ocr_text=lambda *_args, **_kwargs: "",
+            simplify=lambda value: value,
+        )
+        self.assertFalse(trader._wait_for_cooking_started(DEFAULT_RECIPES[0], 0.0))
 
     def test_cooking_implementation_has_no_scroll_or_resolution_pixel_clicks(self):
         source = inspect.getsource(CookingFlowMixin)
@@ -308,6 +349,15 @@ class CookingFlowTest(unittest.TestCase):
 
 
 class CookingRecognitionTest(unittest.TestCase):
+    def test_card_background_distinguishes_gray_bright_and_uncertain(self):
+        for size in (64, 96):
+            match = MatchResult(0.97, (0, 0), (size, size))
+            for value, expected in ((60, False), (145, True), (100, None)):
+                frame = np.full((size, size, 3), value, dtype=np.uint8)
+                # Dark food art does not make an available beige card disabled.
+                frame[size // 4:3 * size // 4, size // 4:3 * size // 4] = 0
+                self.assertIs(expected, CookingFlowMixin._cooking_card_enabled(frame, match))
+
     def test_detail_enabled_gate_separates_video_bright_and_disabled_states(self):
         recipe = DEFAULT_RECIPES[0]
         frame = np.zeros((1080, 1920, 3), dtype=np.uint8)
