@@ -65,12 +65,12 @@ class StartCardResponsiveController:
 
         for label in (card.titleLabel, card.contentLabel):
             policy = label.sizePolicy()
-            policy.setHorizontalPolicy(QSizePolicy.Ignored)
+            policy.setHorizontalPolicy(QSizePolicy.Preferred)
             label.setSizePolicy(policy)
-            label.setMinimumWidth(0)
 
         # 标题与版本号放入专属容器，避免在布局间跨父级转移 QLayout
         self.title_widget = QWidget(card)
+        self.title_widget.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Preferred)
         self.title_layout = QVBoxLayout(self.title_widget)
         self.title_layout.setContentsMargins(0, 0, 0, 0)
         self.title_layout.setSpacing(2)
@@ -127,7 +127,10 @@ class StartCardResponsiveController:
 
     def apply_status_elision(self, width):
         full = getattr(self.status_bar, "_bd2_full_title", self.status_bar.title)
-        cap = max(_STATUS_BAR_MIN_WIDTH, width - _STATUS_BAR_RESERVE_WIDTH)
+        # 视口宽度减去卡片内部其他元素（图标、标题/版本、边距与间距）的占位
+        title_w = self.title_widget.sizeHint().width()
+        reserve = 30 + 16 + title_w + 16 + 36 + 36
+        cap = max(70, width - reserve)
         metrics = self.status_bar.titleLabel.fontMetrics()
         if metrics.horizontalAdvance(full) + 50 <= cap:
             text = full
@@ -137,6 +140,10 @@ class StartCardResponsiveController:
             return
         self.status_bar.setToolTip(text != full and full or "")
         self.original_set_title(text)
+        self.status_bar.updateGeometry()
+        self.row1_widget.updateGeometry()
+        self.root_widget.updateGeometry()
+        self.card.updateGeometry()
 
     def set_mode(self, mode):
         if self.current_mode == mode:
@@ -160,6 +167,11 @@ class StartCardResponsiveController:
             self.card.setMinimumHeight(0)
             self.card.setMaximumHeight(_QWIDGETSIZE_MAX)
             self.card.adjustSize()
+
+        self.row1_widget.updateGeometry()
+        self.row2_widget.updateGeometry()
+        self.root_widget.updateGeometry()
+        self.card.updateGeometry()
 
     def update_width(self, width):
         required_w = _START_CARD_SINGLE_ROW_MIN_WIDTH
