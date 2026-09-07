@@ -1,21 +1,21 @@
-"""启动页（StartTab）窄宽度响应式重排。
+"""启动页（StartTab）窄宽度响应式重排与自适应优化。
 
-窗口最小宽度 600 下，页面视口只剩三百多像素；而启动页多行的最小宽度之和
-远超这个值，ScrollArea 关闭了横向滚动条，超宽的 view 整体被右端裁切——
-表现就是 StartCard 上截图/刷新/启动三个按钮被遮挡。
+1. StartCard：
+   - 宽屏（视口足够容纳单行）时采用标准紧凑单行模式（70px 高），
+     图标、标题/版本、状态条、三个操作按钮均在同一水平线上，完全消除高度错位与空白。
+   - 窄屏（视口不足以容纳单行）时自适应平滑折行为紧凑双行模式，
+     第一行放图标、标题与状态条，第二行右对齐容纳截图/刷新/启动按钮。
+   - 状态条随视口收窄自动进行省略处理并附加完整提示 Tooltip。
 
-这里从四个来源把最小宽度降下来：
+2. 实时截图与控制栏（实时截图行）：
+   - 实时截图框随窗口横向拉伸按 16:9 比例放大，直到高度顶格（结合当前视口高度动态求取上限）。
+   - 截图框达到顶格高度上限后固定宽度与高度，剩余水平拉伸空间完全由右侧
+     “开发工具”与“手动调整分辨率”两栏向右充分铺开。
+   - 视口过窄（如窄于 560px）时截图行自适应平滑堆叠为上下排列。
 
-1. StartCard：标题/版本与状态条留第一行（两者都可收窄：标题裁切、状态条
-   按视口宽度省略为 "…"），三个按钮挪到第二行右对齐流式布局，放不下时
-   自动换行；卡片放开固定 70px 高度并打通 height-for-width。
-2. Debug 卡片的按钮行：改为流式布局，窄了换行而不是撑宽整页。
-3. 选择窗口/截图方式/交互方式三个列表：横向策略改 Ignored 并解除
-   Card 的 SetMinimumSize 约束，允许随视口收窄（列表内容自身可裁切）。
-4. 实时截图行：视口宽度不足时由左右并排切换为上下堆叠。
-
-状态条省略与截图行堆叠都由 ScrollArea 视口的 resize 驱动：监听控件自身
-会自锁——水平方向的最小宽度使控件永远收不到触发切换的那次 resize。
+3. 选择窗口/截图方式/交互方式列表以及 Debug 工具栏：
+   - 列表横向策略支持 Ignored 收窄，Card 解除强制 minimumSize 约束。
+   - 工具栏内部采用 WrappingFlowLayout 换行，防止撑死整页最小宽度。
 """
 
 from PySide6.QtCore import QEvent, QObject, Qt
@@ -25,14 +25,18 @@ from src.ui.responsive_task_config import WrappingFlowLayout
 
 _QWIDGETSIZE_MAX = 16777215
 
-# 视口宽度减去该余量即状态条允许的最大宽度：页边距、图标、行间距与标题列。
-_STATUS_BAR_RESERVE_WIDTH = 140
-_STATUS_BAR_MIN_WIDTH = 100
-
 # 实时截图行并排的最低舒适视口宽度：预览最小 240 + 侧栏约 230 + 页边距。
 # 堆叠/恢复之间留 40px 滞回，避免竖滚动条出现/消失引起的来回抖动。
 _LOWER_ROW_STACK_BELOW = 560
 _LOWER_ROW_UNSTACK_ABOVE = 600
+
+# 状态条省略阈值余量
+_STATUS_BAR_RESERVE_WIDTH = 140
+_STATUS_BAR_MIN_WIDTH = 100
+
+# StartCard 单行最小容纳宽度估算：
+# icon(30)+spacing(16)+title(~120)+statusBar(~120)+spacings(24)+3 buttons(~300)+margins(36) ≈ 650
+_START_CARD_SINGLE_ROW_MIN_WIDTH = 680
 
 
 def _enable_height_for_width(widget):
@@ -41,83 +45,135 @@ def _enable_height_for_width(widget):
     widget.setSizePolicy(policy)
 
 
-def _reflow_start_card(card):
-    buttons = (card.capture_button, card.refresh_button, card.start_button)
-    status_bar = card.status_bar
-    header = card.hBoxLayout
+class StartCardResponsiveController:
+    """管理 StartCard 在宽屏单行与窄屏折行之间的自适应切换。"""
 
-    for widget in (card.iconLabel, status_bar, *buttons):
-        header.removeWidget(widget)
-    header.removeItem(card.vBoxLayout)
-    while header.count():
-        # 剩余的都是固定间距与拉伸占位，随旧行布局一并丢弃。
-        item = header.takeAt(0)
-        del item
+    def __init__(self, card):
+        self.card = card
+        self.buttons = (card.capture_button, card.refresh_button, card.start_button)
+        self.status_bar = card.status_bar
+        self.icon_label = card.iconLabel
+        self.vbox_layout = card.vBoxLayout
+        self.header = card.hBoxLayout
 
-    # 极窄时标题/版本可以被裁切，但不能把按钮挤出卡片。
-    for label in (card.titleLabel, card.contentLabel):
-        policy = label.sizePolicy()
-        policy.setHorizontalPolicy(QSizePolicy.Ignored)
-        label.setSizePolicy(policy)
-        label.setMinimumWidth(0)
+        for widget in (self.icon_label, self.status_bar, *self.buttons):
+            self.header.removeWidget(widget)
+        self.header.removeItem(self.vbox_layout)
+        while self.header.count():
+            item = self.header.takeAt(0)
+            del item
 
-    container = QWidget()
-    container_layout = QVBoxLayout(container)
-    # header 自带左边距 16；原行布局在启动按钮后留了 20px 右间距。
-    container_layout.setContentsMargins(0, 10, 20, 10)
-    container_layout.setSpacing(8)
+        for label in (card.titleLabel, card.contentLabel):
+            policy = label.sizePolicy()
+            policy.setHorizontalPolicy(QSizePolicy.Ignored)
+            label.setSizePolicy(policy)
+            label.setMinimumWidth(0)
 
-    top_row = QHBoxLayout()
-    top_row.setContentsMargins(0, 0, 0, 0)
-    top_row.setSpacing(16)
-    top_row.addWidget(card.iconLabel, 0, Qt.AlignVCenter)
-    top_row.addLayout(card.vBoxLayout, 1)
-    top_row.addWidget(status_bar, 0, Qt.AlignVCenter | Qt.AlignRight)
-    container_layout.addLayout(top_row)
+        self.root_widget = QWidget()
+        self.root_layout = QVBoxLayout(self.root_widget)
+        self.root_layout.setContentsMargins(0, 0, 0, 0)
+        self.root_layout.setSpacing(0)
 
-    button_row = WrappingFlowLayout(spacing=6, alignment=Qt.AlignRight | Qt.AlignVCenter)
-    for button in buttons:
-        button_row.addWidget(button)
-    container_layout.addLayout(button_row)
+        # 单行布局容器
+        self.single_widget = QWidget()
+        self.single_layout = QHBoxLayout(self.single_widget)
+        self.single_layout.setContentsMargins(0, 0, 20, 0)
+        self.single_layout.setSpacing(6)
 
-    header.addWidget(container, 1)
+        # 双行布局容器
+        self.double_widget = QWidget()
+        self.double_layout = QVBoxLayout(self.double_widget)
+        self.double_layout.setContentsMargins(0, 8, 20, 8)
+        self.double_layout.setSpacing(6)
 
-    # SettingCard 固定 70px 高会裁掉换行后的第二排按钮，放开高度限制。
-    card.setMinimumHeight(0)
-    card.setMaximumHeight(_QWIDGETSIZE_MAX)
-    card_policy = card.sizePolicy()
-    card_policy.setHorizontalPolicy(QSizePolicy.Expanding)
-    card_policy.setVerticalPolicy(QSizePolicy.Preferred)
-    card.setSizePolicy(card_policy)
+        self.double_row1 = QHBoxLayout()
+        self.double_row1.setContentsMargins(0, 0, 0, 0)
+        self.double_row1.setSpacing(16)
 
-    # height-for-width 需要逐层打通，外层布局才会按宽度重新求高度。
-    _enable_height_for_width(container)
-    _enable_height_for_width(card)
+        self.double_row2 = WrappingFlowLayout(spacing=6, alignment=Qt.AlignRight | Qt.AlignVCenter)
+        self.double_layout.addLayout(self.double_row1)
+        self.double_layout.addLayout(self.double_row2)
 
-    # StatusBar 按文本长度定死宽度，长状态文本（如窗口未前置的暂停提示）
-    # 自己就能把整行撑出视口。记录全文，实际显示宽度由
-    # _NarrowLayoutFilter 按视口宽度重新省略。
-    original_set_title = status_bar.setTitle
+        self.root_layout.addWidget(self.single_widget)
+        self.root_layout.addWidget(self.double_widget)
+        self.header.addWidget(self.root_widget, 1)
 
-    def set_title(title):
-        status_bar._bd2_full_title = title
-        _apply_status_elision(status_bar, card.width())
+        _enable_height_for_width(self.root_widget)
+        _enable_height_for_width(self.double_widget)
+        _enable_height_for_width(self.card)
 
-    def _apply_status_elision(bar, width):
-        full = getattr(bar, "_bd2_full_title", bar.title)
+        self.card_policy = card.sizePolicy()
+        self.card_policy.setHorizontalPolicy(QSizePolicy.Expanding)
+        self.card_policy.setVerticalPolicy(QSizePolicy.Preferred)
+        self.card.setSizePolicy(self.card_policy)
+
+        self.current_mode = None
+        self.set_mode("single")
+
+        # 状态条长文本动态省略
+        self.original_set_title = self.status_bar.setTitle
+        self.status_bar.setTitle = self._set_title
+
+    def _set_title(self, title):
+        self.status_bar._bd2_full_title = title
+        self.apply_status_elision(self.card.width())
+
+    def apply_status_elision(self, width):
+        full = getattr(self.status_bar, "_bd2_full_title", self.status_bar.title)
         cap = max(_STATUS_BAR_MIN_WIDTH, width - _STATUS_BAR_RESERVE_WIDTH)
-        metrics = bar.titleLabel.fontMetrics()
+        metrics = self.status_bar.titleLabel.fontMetrics()
         if metrics.horizontalAdvance(full) + 50 <= cap:
             text = full
         else:
             text = metrics.elidedText(full, Qt.ElideRight, cap - 50)
-        if text == bar.titleLabel.text():
+        if text == self.status_bar.titleLabel.text():
             return
-        bar.setToolTip(text != full and full or "")
-        original_set_title(text)
+        self.status_bar.setToolTip(text != full and full or "")
+        self.original_set_title(text)
 
-    status_bar.setTitle = set_title
-    card._bd2_apply_status_elision = lambda width: _apply_status_elision(status_bar, width)
+    def set_mode(self, mode):
+        if self.current_mode == mode:
+            return
+        self.current_mode = mode
+
+        if mode == "single":
+            self.double_widget.hide()
+            self.single_layout.addWidget(self.icon_label, 0, Qt.AlignVCenter)
+            self.single_layout.addSpacing(16)
+            self.single_layout.addLayout(self.vbox_layout)
+            self.single_layout.addSpacing(16)
+            self.single_layout.addWidget(self.status_bar, 0, Qt.AlignVCenter)
+            self.single_layout.addStretch(1)
+            for b in self.buttons:
+                self.single_layout.addWidget(b, 0, Qt.AlignVCenter)
+            self.single_widget.show()
+            self.card.setMinimumHeight(70)
+            self.card.setMaximumHeight(70)
+        else:
+            self.single_widget.hide()
+            self.double_row1.addWidget(self.icon_label, 0, Qt.AlignVCenter)
+            self.double_row1.addLayout(self.vbox_layout, 1)
+            self.double_row1.addWidget(self.status_bar, 0, Qt.AlignVCenter | Qt.AlignRight)
+            for b in self.buttons:
+                self.double_row2.addWidget(b)
+            self.double_widget.show()
+            self.card.setMinimumHeight(0)
+            self.card.setMaximumHeight(_QWIDGETSIZE_MAX)
+            self.card.adjustSize()
+
+    def update_width(self, width):
+        required_w = _START_CARD_SINGLE_ROW_MIN_WIDTH
+        if hasattr(self.status_bar, "titleLabel") and not self.status_bar.isHidden():
+            full = getattr(self.status_bar, "_bd2_full_title", self.status_bar.title)
+            status_w = self.status_bar.titleLabel.fontMetrics().horizontalAdvance(full) + 50
+            required_w = max(required_w, 480 + status_w)
+
+        if width >= required_w:
+            self.set_mode("single")
+        else:
+            self.set_mode("double")
+
+        self.apply_status_elision(width)
 
 
 def _wrap_debug_row(start_tab):
@@ -153,10 +209,11 @@ def _shrink_selector_row(start_tab):
         container = getattr(start_tab, attr, None)
         if container is None:
             continue
-        # Card 的 SetMinimumSize 约束会把布局最小宽度写死成控件的
-        # minimumSize，解除后才能随视口收窄。
-        for layout in (container.layout(), getattr(container, "cardLayout", None),
-                       getattr(container, "topLayout", None)):
+        for layout in (
+            container.layout(),
+            getattr(container, "cardLayout", None),
+            getattr(container, "topLayout", None),
+        ):
             if layout is not None:
                 layout.setSizeConstraint(QLayout.SetDefaultConstraint)
         container.setMinimumWidth(0)
@@ -166,29 +223,51 @@ def _shrink_selector_row(start_tab):
 
 
 class _NarrowLayoutFilter(QObject):
-    """视口 resize 时联动：状态条按宽度省略 + 实时截图行并排/堆叠切换。"""
+    """视口 resize 时的响应式联动调度。"""
 
-    def __init__(self, start_tab):
+    def __init__(self, start_tab, controller):
         super().__init__(start_tab)
         self._start_tab = start_tab
+        self._controller = controller
 
     def eventFilter(self, _watched, event):
         if event.type() != QEvent.Resize:
             return False
-        width = event.size().width()
+        viewport_w = event.size().width()
+        viewport_h = event.size().height()
 
-        apply_elision = getattr(self._start_tab.start_card, "_bd2_apply_status_elision", None)
-        if apply_elision is not None:
-            apply_elision(width)
+        # 1. 顶栏根据宽度平滑切换单行/折行与状态省略
+        self._controller.update_width(viewport_w)
 
+        # 2. 截图行根据宽度决定并排还是堆叠
         lower_row = getattr(self._start_tab, "live_screenshot_row", None)
         layout = lower_row.layout() if lower_row is not None else None
         if layout is not None:
             direction = layout.direction()
-            if direction != QBoxLayout.TopToBottom and width < _LOWER_ROW_STACK_BELOW:
+            if direction != QBoxLayout.TopToBottom and viewport_w < _LOWER_ROW_STACK_BELOW:
                 layout.setDirection(QBoxLayout.TopToBottom)
-            elif direction != QBoxLayout.LeftToRight and width > _LOWER_ROW_UNSTACK_ABOVE:
+            elif direction != QBoxLayout.LeftToRight and viewport_w > _LOWER_ROW_UNSTACK_ABOVE:
                 layout.setDirection(QBoxLayout.LeftToRight)
+
+        # 3. 动态计算实时截图框的最大允许高度与宽度，使其随窗口高度顶格放大，多余宽度交给右侧侧栏
+        live_card = getattr(self._start_tab, "live_screenshot_card", None)
+        if live_card is not None and layout is not None:
+            if layout.direction() == QBoxLayout.TopToBottom:
+                live_card.setMaximumWidth(_QWIDGETSIZE_MAX)
+            else:
+                # 顶部占位高度（StartCard + 列表栏 + 外间距边距）约 440px
+                start_card = getattr(self._start_tab, "start_card", None)
+                selector = getattr(self._start_tab, "selector_widget", None)
+                top_h = (start_card.height() if start_card else 70) + (
+                    selector.height() if selector else 320
+                ) + 50
+                avail_h = max(240, viewport_h - top_h - 20)
+                # 预览卡片头部文字及间距约占 84px，
+                # 画面最高不超过 avail_h - 84，同时设置合理硬上限 450px
+                max_preview_h = min(450, max(135, avail_h - 84))
+                max_preview_w = int(max_preview_h * 16 / 9)
+                live_card.setMaximumWidth(max_preview_w + 32)
+
         return False
 
 
@@ -197,7 +276,7 @@ def install_responsive_start_tab(start_tab) -> bool:
     if card is None or getattr(card, "_bd2_responsive_installed", False):
         return False
 
-    _reflow_start_card(card)
+    controller = StartCardResponsiveController(card)
     _wrap_debug_row(start_tab)
     _shrink_selector_row(start_tab)
 
@@ -205,7 +284,7 @@ def install_responsive_start_tab(start_tab) -> bool:
     if view is not None:
         _enable_height_for_width(view)
 
-    start_tab.viewport().installEventFilter(_NarrowLayoutFilter(start_tab))
+    start_tab.viewport().installEventFilter(_NarrowLayoutFilter(start_tab, controller))
 
     card._bd2_responsive_installed = True
     return True

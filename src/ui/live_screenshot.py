@@ -450,15 +450,16 @@ def install_live_screenshot(start_tab) -> None:
 
     live_widget = LiveScreenshotWidget()
     live_card = Card("实时截图", live_widget, stretch=0)
-    live_card.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Maximum)
+    live_card.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Maximum)
 
     lower_row = QWidget(start_tab.view)
     lower_layout = QHBoxLayout(lower_row)
     lower_layout.setContentsMargins(0, 0, 0, 0)
     lower_layout.setSpacing(12)
-    lower_layout.addWidget(live_card, 1, Qt.AlignTop)
+    lower_layout.addWidget(live_card, 0, Qt.AlignTop)
 
     side_column = QWidget(lower_row)
+    side_column.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
     side_layout = QVBoxLayout(side_column)
     side_layout.setContentsMargins(0, 0, 0, 0)
     side_layout.setSpacing(12)
