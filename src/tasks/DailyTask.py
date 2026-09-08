@@ -358,11 +358,12 @@ class DailyTask(TaskVisionMixin, QuickHuntConfigMixin, BaseBD2Task):
                     retry_frame = self.capture_frame()
                 except Exception:
                     retry_frame = None
-                if retry_frame is not None and not self._frame_confirms_home(
+                if retry_frame is None or not self._frame_confirms_home(
                     retry_frame, "小屋签到重试前主页"
                 ):
                     self.log_info(
-                        "小屋签到：点击后已离开主页（转场/加载中），停止补点，等待小屋模板。"
+                        "小屋签到：无法确认仍位于主页（截图失败或已离开主页），"
+                        "停止补点，等待小屋模板。"
                     )
                     break
         self._status_set("小屋签到 loading 状态", loading_state)

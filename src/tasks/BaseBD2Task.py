@@ -303,8 +303,27 @@ class BaseBD2Task(BaseTask):
                 return True
 
             if has_house_hint:
+                # 抽抽乐偶发漏识别会把“主页”误判成非主页；先多帧复核主页，
+                # 任一帧确认主页即停止；复核全为“非主页且 H 仍在”才点房子。
+                stable = True
+                for _ in range(2):
+                    self.sleep(0.4)
+                    try:
+                        probe_frame = self.capture_frame()
+                    except Exception as exc:
+                        self.log_warning(f"自动返回主页：复核截图失败：{exc}")
+                        return False
+                    probe_home, probe_house = self._home_scan(probe_frame)
+                    if probe_home:
+                        return True
+                    if not probe_house:
+                        stable = False
+                        break
+                if not stable:
+                    self.log_warning("自动返回主页：H/房子信号不稳定，安全停止，不点击。")
+                    return False
                 self.log_info(
-                    f"自动返回主页：第 {step} 步识别到右上角 H，点房子回主页。"
+                    f"自动返回主页：第 {step} 步多帧复核确认非主页且 H 存在，点房子回主页。"
                 )
                 x = float(self.config.get("返回主页按钮 X 百分比", 93.75)) / 100.0
                 y = float(self.config.get("返回主页按钮 Y 百分比", 5.9)) / 100.0
