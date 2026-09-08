@@ -75,6 +75,10 @@ if ([string]::IsNullOrWhiteSpace($normalizedChangelog)) {
 }
 
 $releaseNotes = @(
+    if ($nonEmptyDetails[0] -match '^[a-z]+(?:\([^)]+\))?:\s+(\*\*.+\*\*)$') {
+        "## $($Matches[1])"
+        ""
+    }
     "### 更新日志 $normalizedStartTag -> $EndTag"
     ""
     $normalizedChangelog
