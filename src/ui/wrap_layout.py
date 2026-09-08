@@ -115,17 +115,21 @@ class WrapLayout(QLayout):
             if item.widget() is not None and item.widget().isHidden():
                 continue
             hint = item.sizeHint()
-            next_x = x + hint.width() + h_space
-            if line and next_x - h_space > effective.right() and line_height > 0:
+            width = max(item.minimumSize().width(), min(hint.width(), effective.width()))
+            height = hint.height()
+            if item.hasHeightForWidth():
+                height = max(item.minimumSize().height(), item.heightForWidth(width))
+            next_x = x + width + h_space
+            if line and next_x - h_space > effective.right() + 1 and line_height > 0:
                 flush_line(y, line_height)
                 y += line_height + v_space
                 x = effective.x()
-                next_x = x + hint.width() + h_space
+                next_x = x + width + h_space
                 line = []
                 line_height = 0
-            line.append((item, hint.width(), hint.height()))
+            line.append((item, width, height))
             x = next_x
-            line_height = max(line_height, hint.height())
+            line_height = max(line_height, height)
         flush_line(y, line_height)
         return y + line_height - rect.y() + margins.bottom()
 

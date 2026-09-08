@@ -17,7 +17,7 @@ from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QWidget
 
 from src.ui.shrinkable_label import ShrinkableLabel
-from src.ui.wrap_layout import wrap_container
+from src.ui.wrap_layout import WrapLayout, wrap_container
 
 PATCH_MARKER = "_ok_bd2_about_tab_layout_enabled"
 
@@ -72,9 +72,19 @@ def _flow_links_bar(version_card) -> None:
     widgets = _drain_widgets(links_bar.layout)
     if not widgets:
         return
-    # 链接按钮保持原有右对齐，只有放不下时才折行。
-    container, _wrap = wrap_container(widgets, alignment=Qt.AlignmentFlag.AlignRight)
-    _replace_widget(version_card.hBoxLayout, links_bar, container, stretch=1)
+    # LinksBar 是分享按钮的槽接收者，须保留其生命周期，只替换内部布局。
+    old_layout_host = QWidget()
+    old_layout_host.setLayout(links_bar.layout)
+    old_layout_host.deleteLater()
+    wrap = WrapLayout(links_bar, alignment=Qt.AlignmentFlag.AlignRight)
+    wrap.setSpacing(8)
+    for widget in widgets:
+        wrap.addWidget(widget)
+    links_bar.layout = wrap
+    policy = links_bar.sizePolicy()
+    policy.setHeightForWidth(True)
+    links_bar.setSizePolicy(policy)
+    version_card.hBoxLayout.setStretchFactor(links_bar, 1)
     # SettingCard 把高度钉在 70，折成两行时按钮会被上下裁掉，放行高度。
     version_card.setMinimumHeight(70)
     version_card.setMaximumHeight(16777215)
