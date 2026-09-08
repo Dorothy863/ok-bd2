@@ -140,6 +140,8 @@ config = {
         <p style="color:red;">
         Use automation only after understanding the risks for your account and game client.
         </p>
+        <p>本软件使用 MiSans 字体。MiSans © 小米科技有限责任公司。
+        字体许可协议随附于 assets/fonts/LICENSE.txt。</p>
     """,
     "log_file": "logs/ok-bd2.log",
     "error_log_file": "logs/ok-bd2_error.log",

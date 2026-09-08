@@ -168,6 +168,7 @@ class ThemeTokenTest(QuestUiTestBase):
         self.addCleanup(QApplication.instance().setFont, previous_app_font)
 
         apply_app_font()
+        self.assertTrue(QApplication.instance().property("bd2_bundled_font_loaded"))
         self.assertEqual(
             ("MiSans", "Microsoft YaHei UI", "Microsoft YaHei", "Segoe UI"),
             APP_FONT_FAMILIES,
