@@ -376,9 +376,12 @@ class BaseBD2Task(BaseTask):
             threshold = float(self.config.get("左上角返回模板阈值", 0.55))
             spec = TemplateSpec(
                 name="top_left_back_bar",
-                file_name="image/back_return_bar_arrow.png",
+                # root 层 = 1080p 基准；统一 task_vision 按 frame/1920 等比缩放
+                file_name="back_return_bar_arrow.png",
                 default_threshold=threshold,
                 roi=(0, 0, 270, 120),  # 1920x1080 参考：左上角约 300x140(@2560) 区域
+                candidate_center_roi=(0.0, 0.0, 0.16, 0.14),
+                scale_ratios=(0.95, 1.0, 1.05),
             )
             cache = self.__dict__.setdefault("_central_template_cache", {})
 
