@@ -2175,6 +2175,77 @@ class PVPTaskHelperTest(unittest.TestCase):
         self.assertEqual("failed", PVPTask._start_auto_battle(task, 1))
         self.assertEqual(["pvp_auto_battle_failed"], diagnostics)
 
+    def test_start_auto_battle_reclicks_stage_when_menu_missing(self):
+        task = object.__new__(PVPTask)
+        task.config = {}
+        task.info_set = lambda *_args, **_kwargs: None
+        task.log_info = lambda *_args, **_kwargs: None
+        task.log_warning = lambda *_args, **_kwargs: None
+        stage_clicks = []
+        task._click_template_until = lambda *_args, **_kwargs: (
+            stage_clicks.append(_args) or True
+        )
+        task._ensure_free_ap_enabled = lambda: True
+        task._ensure_multiplier = lambda _multiplier: True
+        task._select_max_battle_count = lambda: None
+        reference_clicks = []
+        task._click_screen_reference = (
+            lambda x, y, after_sleep=0.0: reference_clicks.append((x, y))
+        )
+        task._click_ocr_pattern_center = lambda *args, **kwargs: True
+        task.capture_frame = lambda: np.zeros((1440, 2560, 3), dtype=np.uint8)
+        task.sleep = lambda *_args, **_kwargs: None
+
+        def fake_ocr_text(_frame, name, roi=None):
+            if name == "PVP 战斗中":
+                return "正在进行"
+            return ""
+
+        task._ocr_text = fake_ocr_text
+        auto_menu_waits = []
+
+        def fake_wait_for_ocr_patterns(_patterns, timeout, name, **_kwargs):
+            if name == "PVP 自动战斗":
+                auto_menu_waits.append(timeout)
+                return (len(auto_menu_waits) >= 2, "自动战斗")
+            if name == "PVP 自动战斗菜单":
+                return True, "鲜血鸡尾酒"
+            return False, ""
+
+        task._wait_for_ocr_patterns = fake_wait_for_ocr_patterns
+        diagnostics = []
+        task._save_flow_diagnostic = diagnostics.append
+
+        self.assertEqual("started", PVPTask._start_auto_battle(task, 1))
+        # BUG-20260908-04：使者不在台上时首击被当作移动指令，菜单未出应
+        # 补击舞台而不是直接判失败。
+        self.assertEqual(2, len(stage_clicks))
+        self.assertEqual(2, len(auto_menu_waits))
+        self.assertEqual([], diagnostics)
+
+    def test_start_auto_battle_stage_reclick_budget_gives_up(self):
+        task = object.__new__(PVPTask)
+        task.config = {}
+        task.info_set = lambda *_args, **_kwargs: None
+        task.log_info = lambda *_args, **_kwargs: None
+        task.log_warning = lambda *_args, **_kwargs: None
+        task._click_template_until = lambda *_args, **_kwargs: True
+        menu_waits = []
+
+        def fake_wait_for_ocr_patterns(_patterns, timeout, name, **_kwargs):
+            if name == "PVP 自动战斗":
+                menu_waits.append(timeout)
+            return False, "2 0"
+
+        task._wait_for_ocr_patterns = fake_wait_for_ocr_patterns
+        diagnostics = []
+        task._save_flow_diagnostic = diagnostics.append
+
+        self.assertEqual("failed", PVPTask._start_auto_battle(task, 1))
+        # BUG-20260908-04：重试预算用尽才判失败，保留 pvp_auto_battle_failed 落帧。
+        self.assertEqual(PVP_CLICK_VERIFY_ATTEMPTS, len(menu_waits))
+        self.assertEqual(["pvp_auto_battle_failed"], diagnostics)
+
     def test_start_auto_battle_retries_clicks_until_menu_confirmed(self):
         task = object.__new__(PVPTask)
         task.config = {}
