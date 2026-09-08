@@ -100,24 +100,12 @@ class BaseBD2Task(BaseTask):
         self.default_config.update(
             {
                 "识别成功后等待秒数": 1.0,
-                # 自动返回主页按钮位置（右上角“小房子”，格鲁菲餐厅实测 2560x1440 的约 (2400,85)）。
-                "返回主页按钮 X 百分比": 93.75,
-                "返回主页按钮 Y 百分比": 5.9,
-                "主页确认自动返回主页次数": 2,
-                "自动返回主页最大步数": 6,
-                "返回主页步间等待秒数": 2.5,
-                "左上角返回模板阈值": 0.55,
-                "左上角返回ROI右百分比": 13,  # 2560x1440 下约 x<333
-                "左上角返回ROI底百分比": 11,  # 2560x1440 下约 y<158
 
             }
         )
         self.config_description.update(
             {
                 "识别成功后等待秒数": "识别成功后，执行下一步点击或切换操作前等待多久。",
-                "返回主页按钮 X 百分比": "自动返回主页按钮的横向百分比。",
-                "返回主页按钮 Y 百分比": "自动返回主页按钮的纵向百分比。",
-                "主页确认自动返回主页次数": "主页确认超时后，自动点击返回主页按钮的最大次数。",
             }
         )
 
@@ -274,33 +262,25 @@ class BaseBD2Task(BaseTask):
         return func()
 
     def attempt_return_home(self, name: str = "自动返回主页") -> bool:
-        """正式路径点击右上角“主页”按钮，把角色从子界面带回主页面。
-
-        注意：需要调用方先确认当前不在主页面（或在主页确认失败后调用），
-        避免在主页面误点该位置。会移动真实光标（正式版方案）。
-        """
+        """点右上角“房子”按钮一次（需调用方已确认不在主页）。正式路径会移动真实光标。"""
         try:
             x = float(self.config.get("返回主页按钮 X 百分比", 93.75)) / 100.0
             y = float(self.config.get("返回主页按钮 Y 百分比", 5.9)) / 100.0
             self.log_info(f"{name}：点击右上角主页按钮返回主界面。")
-            self.operate_click(
-                x,
-                y,
-                name=name,
-                after_sleep=2.0,
-                down_time=0.02,
-            )
+            self.operate_click(x, y, name=name, after_sleep=2.0, down_time=0.02)
             return True
         except Exception as exc:
             self.log_warning(f"{name}：点击返回主页按钮失败：{exc}")
             return False
 
     def auto_return_main_home(self, max_steps: int | None = None) -> bool:
-        """自动返回主页面。
+        """自动返回主页面（仅主页明确 / 控件正面命中时才动作）。
 
-        每步：截图 → 若已是主页直接成功；否则优先点右上角“H/房子”；
-        无 H 时用 ROI+模板匹配点左上角返回键（仅非主页时执行，主页上它是“返回战场”）。
-        有界循环直到主页或步数用尽。
+        规则：
+        - 主页判定用 OCR 三要素（抽抽乐 + 左列任一入口）；已确认主页直接成功。
+        - 非主页时：只在上、 右上角识别到 H/房子提示，或左上角 ROI 命中“返回”模板时才点击；
+          OCR 失败 / 页面无法确认 / 无正面控件 → 安全停止，绝不盲点（避免误点主页“返回战场”）。
+        - 只在发生实际点击动作后小等待转场，不做全局固定等待。
         """
         step_limit = (
             int(self.config.get("自动返回主页最大步数", 6))
@@ -308,6 +288,7 @@ class BaseBD2Task(BaseTask):
             else int(max_steps)
         )
         settle = float(self.config.get("返回主页步间等待秒数", 2.5))
+        acted = False
         for step in range(1, step_limit + 1):
             try:
                 frame = self.capture_frame()
@@ -317,50 +298,57 @@ class BaseBD2Task(BaseTask):
 
             is_home, has_house_hint = self._home_scan(frame)
             if is_home:
-                self.info_set("自动返回主页", f"已是主页（第{step}步）")
+                if acted:
+                    self.log_info("自动返回主页：已回到主页。")
                 return True
 
             if has_house_hint:
                 self.log_info(
-                    f"自动返回主页：第 {step} 步检测到右上角 H，点房子回主页。"
+                    f"自动返回主页：第 {step} 步识别到右上角 H，点房子回主页。"
                 )
                 x = float(self.config.get("返回主页按钮 X 百分比", 93.75)) / 100.0
                 y = float(self.config.get("返回主页按钮 Y 百分比", 5.9)) / 100.0
                 self.operate_click(x, y, name="自动返回主页-房子", after_sleep=settle)
+                acted = True
                 continue
 
             if self._click_top_left_back(frame, step):
                 self.sleep(settle)
+                acted = True
                 continue
 
             self.log_warning(
-                "自动返回主页：当前非主页且未找到 H/房子或左上角返回按钮，无法继续。"
+                "自动返回主页：未确认到主页，也未正面识别到 H/房子或左上角返回，"
+                "安全停止（不盲点）。"
             )
             return False
 
         self.log_warning(f"自动返回主页：{step_limit} 步内未回到主页。")
         return False
 
-    def _home_scan(self, frame) -> tuple[bool, bool]:
-        """OCR 判定：是否主页（含“抽抽乐”）、右上角是否有 H/房子提示。"""
-        frame_h, frame_w = frame.shape[:2]
-        is_home = False
-        has_house_hint = False
+    def _ocr_boxes(self, frame, name: str):
         try:
-            boxes = list(
+            return list(
                 self.ocr(
                     frame=frame,
                     threshold=0.2,
                     log=False,
-                    name="自动返回主页",
+                    name=name,
                 )
             )
         except Exception:
-            return is_home, has_house_hint
-        for box in boxes:
+            return []
+
+    def _home_scan(self, frame) -> tuple[bool, bool]:
+        """OCR 判定主页（抽抽乐 + 左列任一入口）与右上角 H/房子提示。"""
+        frame_h, frame_w = frame.shape[:2]
+        tokens: list[str] = []
+        has_house_hint = False
+        for box in self._ocr_boxes(frame, "自动返回主页"):
             name = str(getattr(box, "name", "") or "")
-            if "抽抽乐" in name:
-                is_home = True
+            if not name:
+                continue
+            tokens.append(name)
             if name == "H":
                 try:
                     x, y, w, h = int(box.x), int(box.y), int(box.width), int(box.height)
@@ -369,60 +357,64 @@ class BaseBD2Task(BaseTask):
                 cx, cy = x + w // 2, y + h // 2
                 if cx / frame_w > 0.7 and cy / frame_h < 0.25:
                     has_house_hint = True
+        joined = "".join(tokens)
+        left_hits = sum(
+            1 for keyword in ("我的小屋", "格鲁TALK", "街机游戏") if keyword in joined
+        )
+        is_home = "抽抽乐" in joined and left_hits >= 1
         return is_home, has_house_hint
 
     def _click_top_left_back(self, frame, step: int) -> bool:
-        """在左上角 ROI 内用模板匹配“返回”条，命中则点其中心。"""
+        """左上角 ROI + 统一模板匹配“返回”条；命中才点击。"""
         try:
-            import cv2
-
-            frame_h, frame_w = frame.shape[:2]
-            left = 0
-            top = 0
-            right = int(frame_w * float(self.config.get("左上角返回ROI右百分比", 13)) / 100.0)
-            bottom = int(frame_h * float(self.config.get("左上角返回ROI底百分比", 11)) / 100.0)
-            if right <= left or bottom <= top:
-                return False
-            crop = cv2.cvtColor(
-                frame[top:bottom, left:right], cv2.COLOR_BGR2GRAY
-            )
-            template_path = TEMPLATE_DIR / "image" / "back_return_bar_arrow.png"
-            template = cv2.imread(str(template_path), cv2.IMREAD_GRAYSCALE)
-            if template is None:
-                self.log_warning(f"自动返回主页：找不到返回模板 {template_path}")
-                return False
-
+            from src.tasks.map_trade.models import TemplateSpec
+            from src.utils import task_vision
+        except Exception as exc:
+            self.log_warning(f"自动返回主页：导入模板匹配失败：{exc}")
+            return False
+        try:
             threshold = float(self.config.get("左上角返回模板阈值", 0.55))
-            best = None
-            for scale in (0.7, 0.8, 0.9, 1.0, 1.1, 1.2, 1.3):
-                t_width = max(8, round(template.shape[1] * scale))
-                t_height = max(8, round(template.shape[0] * scale))
-                if t_width >= crop.shape[1] or t_height >= crop.shape[0]:
-                    continue
-                resized = cv2.resize(
-                    template,
-                    (t_width, t_height),
-                    interpolation=cv2.INTER_AREA,
-                )
-                result = cv2.matchTemplate(crop, resized, cv2.TM_CCOEFF_NORMED)
-                _min_v, max_v, _min_loc, max_loc = cv2.minMaxLoc(result)
-                if best is None or max_v > best[0]:
-                    best = (max_v, max_loc[0], max_loc[1], t_width, t_height)
-            if best is None or best[0] < threshold:
-                best_score = -1.0 if best is None else best[0]
-                self.info_set("左上角返回模板", f"未命中 {best_score:.3f}/{threshold:.3f}")
-                return False
+            spec = TemplateSpec(
+                name="top_left_back_bar",
+                file_name="image/back_return_bar_arrow.png",
+                default_threshold=threshold,
+                roi=(0, 0, 270, 120),  # 1920x1080 参考：左上角约 300x140(@2560) 区域
+            )
+            cache = self.__dict__.setdefault("_central_template_cache", {})
 
-            score, loc_x, loc_y, t_width, t_height = best
-            center_x = left + loc_x + t_width // 2
-            center_y = top + loc_y + t_height // 2
-            self.info_set("左上角返回模板", f"{score:.3f}/{threshold:.3f} @{center_x},{center_y}")
+            def loader(_template_dir, template_spec):
+                loaded = task_vision.load_template(
+                    TEMPLATE_DIR, template_spec, cache=cache
+                )
+                return loaded[0], loaded[1]
+
+            result = task_vision.match_template(
+                frame,
+                spec,
+                self.config,
+                TEMPLATE_DIR,
+                cache=cache,
+                min_size=8,
+                loader=loader,
+            )
+            frame_h, frame_w = frame.shape[:2]
+            if result.score < threshold:
+                self.info_set("左上角返回模板", f"未命中 {result.score:.3f}/{threshold:.3f}")
+                return False
+            position = tuple(result.position)
+            size = tuple(result.size)
+            center_x = int(position[0] + size[0] // 2)
+            center_y = int(position[1] + size[1] // 2)
+            self.info_set(
+                "左上角返回模板",
+                f"{result.score:.3f}/{threshold:.3f} @{center_x},{center_y}",
+            )
             self.log_info(
                 f"自动返回主页：第 {step} 步 ROI 命中左上角返回 @({center_x},{center_y})，点击。"
             )
             self.operate_click(
-                center_x / frame_w,
-                center_y / frame_h,
+                center_x / max(1, frame_w),
+                center_y / max(1, frame_h),
                 name="自动返回主页-左上返回",
                 after_sleep=0.0,
             )
