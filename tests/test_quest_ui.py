@@ -180,6 +180,27 @@ class ThemeTokenTest(QuestUiTestBase):
         self.assertEqual(label.font().families(), list(APP_FONT_FAMILIES))
         label.close()
 
+        from ok.ui.qt import resources  # noqa: F401
+        from ok.ui.qt.tasks.LabelAndWidget import LabelAndWidget
+        from ok.ui.qt.widget.Tab import Tab
+        from qfluentwidgets import Theme, qconfig, setTheme
+
+        self.addCleanup(setTheme, qconfig.theme)
+        tab = Tab()
+        self.addCleanup(tab.deleteLater)
+        row = LabelAndWidget("系统通知", "使用 Windows 系统托盘显示通知")
+        tab.add_widget(row)
+        tab.ensurePolished()
+        for theme in (Theme.LIGHT, Theme.DARK, Theme.LIGHT):
+            with self.subTest(theme=theme):
+                setTheme(theme)
+                tab.grab()
+                self.assertEqual(row.title.font().families(), list(APP_FONT_FAMILIES))
+                self.assertEqual(row.contentLabel.font().families(), list(APP_FONT_FAMILIES))
+                self.assertEqual(row.title.font().pixelSize(), 14)
+                self.assertEqual(row.contentLabel.font().pixelSize(), 12)
+                self.assertTrue(row.title.font().bold())
+
     def test_palettes_share_the_same_keys(self):
         light = palette(dark=False)
         dark = palette(dark=True)

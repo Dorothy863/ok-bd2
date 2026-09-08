@@ -22,6 +22,35 @@ MONO_FONT = (
 APP_FONT_FAMILIES = ("MiSans", "Microsoft YaHei UI", "Microsoft YaHei", "Segoe UI")
 
 
+def _install_framework_fonts() -> None:
+    """Keep upstream QSS from overriding the application's UI font families."""
+    from ok.ui.qt.common.style_sheet import StyleSheet
+    from ok.ui.qt.start.LogWindow import LogWindow
+
+    if getattr(StyleSheet, "_bd2_fonts_installed", False):
+        return
+    original_content = StyleSheet.content
+    original_log_theme = LogWindow._apply_theme
+    families = ", ".join(f"'{family}'" for family in APP_FONT_FAMILIES)
+
+    def content(self, *args, **kwargs):
+        qss = original_content(self, *args, **kwargs)
+        qss = qss.replace("'Segoe UI', 'Microsoft YaHei', 'PingFang SC'", families)
+        qss = qss.replace(
+            '\"Segoe UI SemiBold\", \"Microsoft YaHei\", \'PingFang SC\'',
+            families + "; font-weight: 600",
+        )
+        return qss.replace("'Microsoft YaHei Light'", families + "; font-weight: 300")
+
+    def log_theme(self):
+        original_log_theme(self)
+        self.status_label.setStyleSheet(f"font-family: {families};")
+
+    StyleSheet.content = content
+    LogWindow._apply_theme = log_theme
+    StyleSheet._bd2_fonts_installed = True
+
+
 def apply_app_font() -> None:
     """Apply the project font stack before qfluentwidgets builds controls."""
     # Importing the app config first ensures its ui_config.json load cannot
@@ -32,6 +61,7 @@ def apply_app_font() -> None:
 
     families = list(APP_FONT_FAMILIES)
     setFontFamilies(families, save=False)
+    _install_framework_fonts()
 
     app = QApplication.instance()
     if app is None:
