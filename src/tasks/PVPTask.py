@@ -537,6 +537,9 @@ class PVPTask(BaseBD2Task):
                 target_reference_offset=PVP_STAGE_CLICK_REFERENCE_OFFSET,
                 after_sleep=3.0,
             ):
+                # BUG-20260908-04：舞台纹理小条失配时无图可查，落帧留存用户
+                # 箱庭实景以定位根因（对照 pvp_hub_entry_failed 等埋点）。
+                self._save_flow_diagnostic("pvp_stage_not_found")
                 self.log_info("镜中之战：未找到 PVP 舞台物件。")
                 return "failed"
 
