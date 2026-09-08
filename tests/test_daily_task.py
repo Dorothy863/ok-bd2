@@ -769,6 +769,8 @@ class DailyTaskHelperTest(unittest.TestCase):
         task._wait_loading_or_template = lambda *_args, **_kwargs: ("none", False)
         task._wait_for_template = lambda *_args, **_kwargs: True
         task._wait_for_home_confirmation = lambda *_args, **_kwargs: True
+        task.capture_frame = lambda: np.zeros((10, 10, 3), dtype=np.uint8)
+        task._frame_confirms_home = lambda *_args, **_kwargs: True
 
         self.assertTrue(DailyTask.run_my_home_sign_in(task))
         # 转场可能吞点击：小屋入口会补点 3 次（默认上限），确认进入后再返回主页。

@@ -771,13 +771,12 @@ if __name__ == "__main__":
     unittest.main()
 
 class AutoLoginEscRecoveryTest(unittest.TestCase):
-    """ESC 返回主页恢复逻辑：宽限、前台发送、等待加载、次数上限。"""
+    """自动返回主页逻辑：宽限、auto_return_main_home 调用、等待加载、次数上限。"""
 
     def _task(self):
         task = object.__new__(AutoLoginTask)
         task.config = {
             "主页 UI 等待宽限秒数": 15.0,
-            "游戏内返回主页按键方式": "前台",
             "游戏内返回主页尝试间隔秒数": 4.0,
             "游戏内返回主页最大尝试次数": 3,
             "返回主页后加载等待秒数": 6.0,
@@ -799,36 +798,32 @@ class AutoLoginEscRecoveryTest(unittest.TestCase):
     def _frame(self):
         return np.zeros((10, 10, 3), dtype=np.uint8)
 
-    def test_grace_period_does_not_send_esc(self):
+    def test_grace_period_does_nothing(self):
         task = self._task()
-        task._esc_home_wait_since = monotonic()  # 刚进入等待，宽限期未过
+        task._esc_home_wait_since = monotonic()  # 宽限期未过
         calls = []
-        task._send_esc = lambda foreground: calls.append(foreground)
+        task.auto_return_main_home = lambda: calls.append(True)
 
         self.assertFalse(AutoLoginTask._maybe_return_home(task, self._frame()))
         self.assertEqual([], calls)
         self.assertEqual(0, task._esc_home_attempts)
 
-    def test_click_first_after_grace_then_holds_for_load(self):
+    def test_calls_auto_return_after_grace_then_holds_for_load(self):
         task = self._task()
-        task._esc_home_wait_since = monotonic() - 30.0  # 已过宽限期
-        clicks = []
-        escs = []
-        task._send_return_home_click = lambda: clicks.append(True)
-        task._send_esc = lambda foreground: escs.append(foreground)
+        task._esc_home_wait_since = monotonic() - 30.0
+        calls = []
+        task.auto_return_main_home = lambda: calls.append(True)
 
-        # 第一次：优先点击右上角主页按钮（不是 ESC）
         self.assertTrue(AutoLoginTask._maybe_return_home(task, self._frame()))
-        self.assertEqual([True], clicks)
-        self.assertEqual([], escs)
+        self.assertEqual([True], calls)
         self.assertEqual(1, task._esc_home_attempts)
 
-        # 紧接着再调用：处于“等待加载”保持期，不重复操作
+        # 紧接着再调用：处于“等待加载”保持期，不重复动作
         self.assertTrue(AutoLoginTask._maybe_return_home(task, self._frame()))
-        self.assertEqual([True], clicks)
+        self.assertEqual([True], calls)
         self.assertEqual(1, task._esc_home_attempts)
 
-    def test_loading_screen_extends_hold_without_sending(self):
+    def test_loading_screen_extends_hold_without_action(self):
         task = self._task()
         task._esc_home_wait_since = monotonic() - 30.0
         task._last_esc_home_at = 0.0
@@ -836,24 +831,25 @@ class AutoLoginEscRecoveryTest(unittest.TestCase):
         task._match = lambda *_args, **_kwargs: MatchResult(0.9, (0, 0), (1, 1))
         task._passes = lambda *_args, **_kwargs: True
         calls = []
-        task._send_esc = lambda foreground: calls.append(foreground)
+        task.auto_return_main_home = lambda: calls.append(True)
 
         self.assertTrue(AutoLoginTask._maybe_return_home(task, self._frame()))
         self.assertEqual([], calls)
         self.assertGreater(task._esc_hold_until, monotonic())
 
-    def test_attempt_cap_stops_sending_and_asks_manual(self):
+    def test_attempt_cap_stops_and_asks_manual(self):
         task = self._task()
         task._esc_home_wait_since = monotonic() - 30.0
         task._esc_home_attempts = 3  # 已达上限
         task._esc_hold_until = 0.0
         task._last_esc_home_at = 0.0
         calls = []
-        task._send_esc = lambda foreground: calls.append(foreground)
+        task.auto_return_main_home = lambda: calls.append(True)
 
         self.assertTrue(AutoLoginTask._maybe_return_home(task, self._frame()))
         self.assertEqual([], calls)
         self.assertEqual(3, task._esc_home_attempts)
+
 
 
 if __name__ == "__main__":

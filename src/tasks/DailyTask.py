@@ -352,6 +352,19 @@ class DailyTask(TaskVisionMixin, QuickHuntConfigMixin, BaseBD2Task):
                 break
             if loading_state == "stuck":
                 break
+            if attempt < entry_clicks:
+                # 补点前重新确认仍在主页；已开始转场/加载则停止补点，交给后续模板等待。
+                try:
+                    retry_frame = self.capture_frame()
+                except Exception:
+                    retry_frame = None
+                if retry_frame is not None and not self._frame_confirms_home(
+                    retry_frame, "小屋签到重试前主页"
+                ):
+                    self.log_info(
+                        "小屋签到：点击后已离开主页（转场/加载中），停止补点，等待小屋模板。"
+                    )
+                    break
         self._status_set("小屋签到 loading 状态", loading_state)
         if loading_state == "stuck":
             self._status_set("小屋页面检测", "否")

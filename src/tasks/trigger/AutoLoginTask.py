@@ -114,9 +114,6 @@ class AutoLoginTask(BaseBD2Task):
                 # 游戏已登录但不在主界面（如格鲁菲餐厅）时，自动返回主页。
                 # 纯后台 PostMessage 点击/按键对该 Unity 游戏无效（2026-09-05 实测），
                 # 必须走正式 operate_click（移动真实光标）或前台按键。
-                "游戏内返回主页先点按钮": True,  # 优先点右上角主页按钮
-                "返回主页点击最大次数": 2,
-                "游戏内返回主页按键方式": "前台",  # 点击无效后的兜底：前台 / 后台
                 "游戏内返回主页尝试间隔秒数": 4.0,
                 "游戏内返回主页最大尝试次数": 3,
                 "返回主页后加载等待秒数": 6.0,
@@ -828,19 +825,14 @@ class AutoLoginTask(BaseBD2Task):
         self.operate_click(x, y, after_sleep=after_sleep)
 
     def _maybe_return_home(self, frame) -> bool:
-        """既非登录页也非主页（如格鲁菲餐厅）时自动返回主界面。
+        """既非登录页也非主页（如格鲁菲餐厅）时自动返回主页。
 
-        走到这里时登录页相关信号（BrownDustX / Confirm / 更新下载 /
-        TOUCH TO START）已排除、主页三项信号确认失败。优先用正式路径
-        operate_click 点右上角“主页”按钮（会移动真实光标，纯后台 PostMessage
-        对该游戏无效）；点击无效后改用 ESC（默认前台），仍无效则提示手动。
-        返回 True 表示本轮由本流程接管，调用方不要再覆盖回“等待登录页”。
+        走到这里时登录页信号已排除、主页未确认。只通过
+        BaseBD2Task.auto_return_main_home() 在正面识别到 H/房子或左上角“返回”时才点击；
+        OCR 失败/无证据则安全停止。不使用抢前台/后台 ESC（评审意见1）。
         """
         now = monotonic()
         attempts = int(getattr(self, "_esc_home_attempts", 0))
-        esc_mode = str(self.config.get("游戏内返回主页按键方式", "前台"))
-        click_first = bool(self.config.get("游戏内返回主页先点按钮", True))
-        max_click = int(self.config.get("返回主页点击最大次数", 2))
         interval = float(self.config.get("游戏内返回主页尝试间隔秒数", 4.0))
         max_attempts = int(self.config.get("游戏内返回主页最大尝试次数", 3))
         load_wait = float(self.config.get("返回主页后加载等待秒数", 6.0))
@@ -891,72 +883,14 @@ class AutoLoginTask(BaseBD2Task):
         self._last_esc_home_at = now
         self._esc_hold_until = now + load_wait
         self._set_stage("返回主页")
-
-        use_click = bool(click_first and attempt_no <= max_click)
-        if use_click:
-            self._set_action(
-                f"点击右上角主页按钮返回主界面（第 {attempt_no}/{max_attempts} 次）。"
-            )
-            self.log_info(
-                "自动登录：检测到游戏内非主页界面，点击右上角主页按钮返回主页"
-                f"（第 {attempt_no}/{max_attempts} 次）。",
-                notify=attempt_no == 1,
-            )
-            self._send_return_home_click()
-        else:
-            foreground = esc_mode != "后台"
-            if foreground:
-                self._set_action(
-                    f"点击无效，切前台按 ESC 返回主界面（第 {attempt_no}/{max_attempts} 次）。"
-                )
-            else:
-                self._set_action(
-                    f"点击无效，后台按 ESC 返回主界面（第 {attempt_no}/{max_attempts} 次）。"
-                )
-            self.log_info(
-                "自动登录：点击返回主页按钮无效，"
-                f"{'前台' if foreground else '后台'}按 ESC 尝试返回主页"
-                f"（第 {attempt_no}/{max_attempts} 次）。",
-                notify=attempt_no == max_click + 1,
-            )
-            self._send_esc(foreground=foreground)
+        self._set_action(f"自动返回主页（第 {attempt_no}/{max_attempts} 次）。")
+        self.log_info(
+            "自动登录：检测到游戏内非主页界面，尝试自动返回主页"
+            f"（第 {attempt_no}/{max_attempts} 次）。",
+            notify=attempt_no == 1,
+        )
+        self.auto_return_main_home()
         return True
-
-    def _send_return_home_click(self) -> None:
-        """正式路径点击右上角“主页”按钮（operate_click 会移动真实光标）。"""
-        try:
-            x = float(self.config.get("返回主页按钮 X 百分比", 93.75)) / 100.0
-            y = float(self.config.get("返回主页按钮 Y 百分比", 5.9)) / 100.0
-            self.operate_click(
-                x,
-                y,
-                name="返回主页按钮",
-                after_sleep=1.0,
-                down_time=0.02,
-            )
-        except Exception as exc:
-            self.log_warning(f"自动登录：点击返回主页按钮失败：{exc}")
-
-    def _send_esc(self, foreground: bool) -> None:
-        try:
-            if foreground:
-                interaction = getattr(self.executor, "interaction", None)
-                hwnd_window = (
-                    getattr(interaction, "hwnd_window", None)
-                    if interaction is not None
-                    else None
-                )
-                if hwnd_window is not None:
-                    hwnd_window.bring_to_front()
-                    self.sleep(0.5)
-                import pydirectinput
-
-                pydirectinput.press("esc")
-                self.sleep(0.5)
-            else:
-                self.send_key("esc", after_sleep=1.5)
-        except Exception as exc:
-            self.log_warning(f"自动登录：发送 ESC 失败：{exc}")
 
     def _reset_login_state(self, action: str = "重新进入自动登录识别。"):
         self._state = "waiting"

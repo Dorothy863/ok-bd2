@@ -345,11 +345,6 @@ class TaskVisionMixin:
             )
             self.info_set(f"{name} 抽抽乐 OCR", last_gacha_text or "-")
             if confirmed:
-                # 返回主页/确认主页后，转场动画仍在进行，立刻点击会被吞
-                # （BUG-20260905：小屋/收菜入口点击被吞）。确认后再稳定等待几秒。
-                settle = float(self.config.get("主页确认后稳定等待秒数", 6.0))
-                if settle > 0:
-                    self.sleep(settle)
                 return True
             self.clear_temporary_home_announcement_if_needed(
                 left_hits=last_left_hits,
@@ -378,19 +373,14 @@ class TaskVisionMixin:
         interval: float = 0.35,
     ) -> bool:
         """主页确认超时后，自动点击右上角主页按钮把角色带回主页面再确认。"""
-        tries = int(self.config.get("主页确认自动返回主页次数", 2))
-        self.log_info(
-            f"{name}：未确认到主页，尝试自动点击返回主页按钮（最多 {tries} 次）。"
-        )
-        for _ in range(tries):
-            self.attempt_return_home(name=f"{name} 自动返回主页")
-            if self._wait_for_home_confirmation(
+        self.log_info(f"{name}：未确认到主页，尝试自动返回主页。")
+        if self.auto_return_main_home():
+            return self._wait_for_home_confirmation(
                 name,
                 interval=interval,
                 timeout=float(self.config.get("主页确认等待秒数", 10.0)),
                 auto_return=False,
-            ):
-                return True
+            )
         return False
 
     @staticmethod
