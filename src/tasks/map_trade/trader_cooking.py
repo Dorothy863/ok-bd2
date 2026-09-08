@@ -65,12 +65,6 @@ COOKING_START_BRIGHT_ROI = (
     1540 / FHD_1080.width,
     1035 / FHD_1080.height,
 )
-COOKING_PROGRESS_ROI = (
-    720 / FHD_1080.width,
-    300 / FHD_1080.height,
-    1240 / FHD_1080.width,
-    760 / FHD_1080.height,
-)
 COOKING_RESULT_ROI = (
     20 / FHD_1080.width,
     420 / FHD_1080.height,
@@ -101,6 +95,21 @@ COOKING_QUANTITY_CLICK_SETTLE_SECONDS = 0.25
 COOKING_EXIT_TIMEOUT = 12.0
 COOKING_POLL_INTERVAL = 0.25
 COOKING_MAX_CHOICE = "MAX"
+COOKING_QUANTITY_ATTEMPTS = 3
+COOKING_QUANTITY_VERIFY_SECONDS = 3.0
+
+# The PC quantity slider fills white and places its handle at this endpoint
+# after MAX takes effect. The template includes the handle and the track cap.
+COOKING_MAX_QUANTITY_TEMPLATE = TemplateSpec(
+    "料理数量最大值",
+    "cooking-quantity-max.png",
+    0.95,
+    relative_roi=(660 / FHD_1080.width, 968 / FHD_1080.height,
+                  730 / FHD_1080.width, 1035 / FHD_1080.height),
+    minimum_safe_threshold=0.95,
+    min_pixel_score=0.95,
+    min_zncc_score=0.95,
+)
 
 COOKING_RECIPE_SPECS = {
     recipe: TemplateSpec(
@@ -324,15 +333,9 @@ class CookingFlowMixin:
                 return CookingRecipeOutcome.FAILED
             return CookingRecipeOutcome.UNAVAILABLE
 
-        quantity = COOKING_MAX_CHOICE
-        if not self._click_quantity_choice(recipe, quantity):
-            self.task.log_warning(f"料理：{recipe} 未识别到数量选项 {quantity}。")
-            self._recover_cooking_list()
-            return CookingRecipeOutcome.FAILED
-
-        ready = self._wait_for_enabled_detail(recipe, 3.0)
+        ready = self._select_max_cooking_quantity(recipe)
         if ready is None:
-            self.task.log_warning(f"料理：选择 {quantity} 后 {recipe} 制作按钮不可用。")
+            self.task.log_warning(f"料理：{recipe} 未确认 MAX 数量，停止制作。")
             self._recover_cooking_list()
             return CookingRecipeOutcome.FAILED
         self._status(
@@ -349,7 +352,7 @@ class CookingFlowMixin:
             after_sleep=0.0,
         )
         if not self._wait_for_cooking_started(recipe, COOKING_START_TIMEOUT):
-            self.task.log_warning(f"料理：{recipe} 点击后未确认制作动画开始。")
+            self.task.log_warning(f"料理：{recipe} 点击后未确认制作按钮变灰。")
             self._recover_cooking_list()
             return CookingRecipeOutcome.FAILED
         if self._wait_for_cooking_result(recipe, COOKING_COMPLETION_TIMEOUT) is None:
@@ -426,7 +429,19 @@ class CookingFlowMixin:
                 return None
             self.task.sleep(COOKING_POLL_INTERVAL)
 
-    def _wait_for_enabled_detail(
+    def _select_max_cooking_quantity(self, recipe: str) -> CookingDetailSnapshot | None:
+        for attempt in range(1, COOKING_QUANTITY_ATTEMPTS + 1):
+            if self._click_quantity_choice(recipe, COOKING_MAX_CHOICE):
+                ready = self._wait_for_max_detail(recipe, COOKING_QUANTITY_VERIFY_SECONDS)
+                if ready is not None:
+                    return ready
+            self.task.log_info(
+                f"料理：{recipe} 第 {attempt}/{COOKING_QUANTITY_ATTEMPTS} 次"
+                "未确认数量滑块到达 MAX。"
+            )
+        return None
+
+    def _wait_for_max_detail(
         self,
         recipe: str,
         timeout: float,
@@ -435,7 +450,9 @@ class CookingFlowMixin:
         while True:
             snapshot = self._cooking_detail_snapshot(recipe)
             if snapshot is not None and snapshot.enabled:
-                return snapshot
+                quantity = self.vision.match(snapshot.frame, COOKING_MAX_QUANTITY_TEMPLATE)
+                if self.vision.passes(quantity, COOKING_MAX_QUANTITY_TEMPLATE):
+                    return snapshot
             if monotonic() >= end_at:
                 return None
             self.task.sleep(COOKING_POLL_INTERVAL)
@@ -538,15 +555,9 @@ class CookingFlowMixin:
     def _wait_for_cooking_started(self, recipe: str, timeout: float) -> bool:
         end_at = monotonic() + max(0.0, timeout)
         while True:
-            frame = self.vision.capture()
-            text = self.vision.ocr_text(
-                frame,
-                f"料理-{recipe}制作中",
-                relative_roi=COOKING_PROGRESS_ROI,
-                target_height=900,
-            )
-            if "制作中" in normalize_text(self.vision.simplify(text)):
-                self._status("料理状态", f"{recipe} 制作已开始")
+            detail = self._cooking_detail_snapshot(recipe)
+            if detail is not None and detail.bright_ratio < COOKING_START_ENABLED_BRIGHT_RATIO:
+                self._status("料理状态", f"{recipe} 制作按钮已变灰")
                 return True
             if monotonic() >= end_at:
                 return False

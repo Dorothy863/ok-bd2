@@ -29,7 +29,7 @@ from src.tasks.MapTradeTask import (
 
 
 class MapTradeLegacyConfigTest(unittest.TestCase):
-    def test_daily_trade_runs_buy_and_sell(self):
+    def test_daily_trade_cooks_before_buy_sell_and_respects_switch(self):
         actions = []
         task = object.__new__(MapTradeTask)
         task.config = {
@@ -62,6 +62,10 @@ class MapTradeLegacyConfigTest(unittest.TestCase):
             def __init__(self, *_args):
                 pass
 
+            def run_cooking(self):
+                actions.append("cook")
+                return True
+
             def run_buy(self):
                 actions.append("buy")
                 return True
@@ -77,8 +81,16 @@ class MapTradeLegacyConfigTest(unittest.TestCase):
             patch.object(map_trade_task_module, "Trader", FakeTrader),
         ):
             self.assertTrue(MapTradeTask.run(task))
-
-        self.assertEqual(["buy", "sell", "home"], actions)
+            self.assertEqual(["cook", "buy", "sell", "home"], actions)
+            actions.clear()
+            task.config["制作料理"] = False
+            self.assertTrue(MapTradeTask.run(task))
+            self.assertEqual(["buy", "sell", "home"], actions)
+            actions.clear()
+            task.config["制作料理"] = True
+            with patch.object(FakeTrader, "run_cooking", lambda _: False):
+                self.assertFalse(MapTradeTask.run(task))
+            self.assertEqual(["home"], actions)
 
 
 class MapTradeConfigTest(unittest.TestCase):
@@ -132,16 +144,20 @@ class MapTradeConfigTest(unittest.TestCase):
         self.assertEqual("每周跑图", collection.name)
         self.assertIn("买", trade.default_config)
         self.assertIn("卖", trade.default_config)
-        self.assertNotIn("料理", trade.description)
+        self.assertIn("料理", trade.description)
         for mapping_name in ("default_config", "config_description"):
             with self.subTest(mapping=mapping_name):
-                self.assertNotIn("制作料理", getattr(trade, mapping_name))
+                self.assertIn("制作料理", getattr(trade, mapping_name))
                 self.assertNotIn("料理制作周期", getattr(trade, mapping_name))
                 self.assertNotIn("料理保险", getattr(trade, mapping_name))
-                self.assertNotIn("5星料理", getattr(trade, mapping_name))
-        self.assertTrue(
-            "制作料理" not in trade.config_type
-        )
+                self.assertIn("5星料理", getattr(trade, mapping_name))
+        self.assertTrue(trade.default_config["制作料理"])
+        self.assertEqual([], trade.default_config["5星料理"])
+        self.assertEqual(["5星料理"], trade.config_type["制作料理"]["sub_configs"][True])
+        self.assertEqual("multi_selection", trade.config_type["5星料理"]["type"])
+        keys = list(trade.default_config)
+        self.assertLess(keys.index("制作料理"), keys.index("买"))
+        self.assertLess(keys.index("买"), keys.index("卖"))
         self.assertNotIn("执行跑商", trade.default_config)
         self.assertNotIn("执行地图采集", trade.default_config)
         self.assertIn("执行地图采集", collection.default_config)
