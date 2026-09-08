@@ -4,9 +4,9 @@ from concurrent.futures import ThreadPoolExecutor
 import cv2
 import numpy as np
 from ok.ui.qt.widget.Card import Card
-from PySide6.QtCore import QEvent, QObject, QSize, Qt, QTimer, Signal
+from PySide6.QtCore import QSize, Qt, QTimer, Signal
 from PySide6.QtGui import QImage, QPixmap
-from PySide6.QtWidgets import QBoxLayout, QHBoxLayout, QLabel, QSizePolicy, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QHBoxLayout, QLabel, QSizePolicy, QVBoxLayout, QWidget
 from qfluentwidgets import CaptionLabel
 
 PREVIEW_INTERVAL_MS = 50
@@ -20,38 +20,6 @@ CAPTURE_LIST_MAX_HEIGHT = 180
 TOP_CARD_CONTENT_EXTRA_HEIGHT = 58
 TOP_CARD_CONTENT_HEIGHT = CAPTURE_LIST_MAX_HEIGHT
 CAPTURE_TIMEOUT_SECONDS = 2.0
-
-# 实时截图/开发工具两列并排的最低行宽；再窄就纵向堆叠，否则两侧必有一侧被裁。
-LOWER_ROW_STACK_THRESHOLD = 600
-
-
-class _RowDirectionSwitcher(QObject):
-    """监听行容器 resize，窄于阈值时在并排/堆叠之间切换（QBoxLayout 方向翻转）。"""
-
-    def __init__(self, row: QWidget, layout: QBoxLayout):
-        super().__init__(row)
-        self._layout = layout
-        row.installEventFilter(self)
-        self._apply(row.width())
-
-    def eventFilter(self, watched, event):
-        if event.type() == QEvent.Type.Resize:
-            self._apply(watched.width())
-        return False
-
-    def _apply(self, width: int) -> None:
-        if width <= 0:
-            return
-        vertical = width < LOWER_ROW_STACK_THRESHOLD
-        direction = (
-            QBoxLayout.Direction.TopToBottom if vertical else QBoxLayout.Direction.LeftToRight
-        )
-        if self._layout.direction() == direction:
-            return
-        self._layout.setDirection(direction)
-        # 并排时两列均分宽度；堆叠时各自按内容取高度，不拉伸。
-        self._layout.setStretch(0, 0 if vertical else 1)
-        self._layout.setStretch(1, 0 if vertical else 1)
 
 
 class LivePreviewLabel(QLabel):
@@ -480,7 +448,6 @@ def install_live_screenshot(start_tab) -> None:
     side_layout.addWidget(manual_resolution_card, 0)
     side_layout.addStretch(1)
     lower_layout.addWidget(side_column, 1)
-    start_tab._lower_row_switcher = _RowDirectionSwitcher(lower_row, lower_layout)
 
     row_index = tab_layout.indexOf(parent)
     tab_layout.insertWidget(row_index + 1, lower_row, 0)

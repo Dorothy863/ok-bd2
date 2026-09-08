@@ -20,7 +20,7 @@ class Globals(QObject):
         from src.game_path import seed_device_manager_launch_path
         from src.ui.feedback_report import install_feedback_report
         from src.ui.fluent_motion import install_fluent_page_transition, install_start_list_motion
-        from src.ui.live_screenshot import install_live_screenshot, install_start_tab_responsive
+        from src.ui.live_screenshot import install_live_screenshot
         from src.ui.nav_sections import install_nav_sections
         from src.ui.quest_theme import apply_app_font
         from src.ui.responsive_start_tab import install_responsive_start_tab
