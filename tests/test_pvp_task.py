@@ -3,17 +3,19 @@ from dataclasses import replace
 from datetime import datetime, timezone
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import Mock, call, patch
 
 import cv2
 import numpy as np
 
 from src.tasks.BaseBD2Task import (
+    FIEND_HUNT_REWARD_TITLE,
     RECENT_CARTRIDGE_SPECIAL_PAGE_SECONDS,
     RECENT_PVP_CARTRIDGE_PIXEL_THRESHOLD,
     RECENT_PVP_CARTRIDGE_TEMPLATE_FILE,
     RECENT_PVP_CARTRIDGE_TEMPLATE_THRESHOLD,
     RECENT_PVP_CARTRIDGE_ZNCC_THRESHOLD,
+    CartridgeSpecialPageResult,
 )
 from src.tasks.BaseBD2Task import TEMPLATE_DIR as RECENT_CARTRIDGE_TEMPLATE_DIR
 from src.tasks.BD2MapCollectionProbeTask import BD2MapCollectionProbeTask
@@ -70,6 +72,144 @@ from src.utils.cartridge_quick_switch import (
     GAMEPLAY_CATEGORY_HIGHLIGHT_MIN_RATIO,
 )
 from src.utils.image_utils import candidate_scales
+
+
+class FiendRewardEntryTest(unittest.TestCase):
+    def make_task(self, screens, *, size=(1920, 1080), recent_pvp=False):
+        task = object.__new__(SquareGoddessTask)
+        task._executor = SimpleNamespace(method=SimpleNamespace(width=size[0], height=size[1]))
+        task.info_set = Mock()
+        task._sleep_after_recognition = lambda: None
+        task._recent_cartridge_is_pvp = lambda: recent_pvp
+        task._is_beijing_monday = lambda: False
+        task._save_flow_diagnostic = Mock()
+        self.now = 0.0
+        self.clicks = []
+        self.screen_index = 0
+
+        def sleep(seconds):
+            self.now += seconds
+
+        def click(x, y, after_sleep=0.0):
+            self.clicks.append((x, y))
+            sleep(after_sleep)
+
+        def ocr_boxes():
+            screen = screens[min(self.screen_index, len(screens) - 1)]
+            self.screen_index += 1
+            return screen
+
+        task.sleep = sleep
+        task.operate_click = click
+        task._recent_cartridge_ocr_boxes = ocr_boxes
+        self.clock = patch("src.tasks.BaseBD2Task.monotonic", side_effect=lambda: self.now)
+        self.clock.start()
+        self.addCleanup(self.clock.stop)
+        return task
+
+    @staticmethod
+    def reward_boxes(size=(1920, 1080)):
+        width, height = size
+        return [
+            SimpleNamespace(name="魔兽追踪者赛季奖励", x=0, y=0, width=100, height=40),
+            SimpleNamespace(
+                name="奖励已发放至背包。", x=width * 0.6, y=height * 0.75,
+                width=width * 0.1, height=height * 0.04,
+            ),
+        ]
+
+    @staticmethod
+    def normal_boxes():
+        return [SimpleNamespace(name="酒馆", x=0, y=0, width=50, height=20)]
+
+    def test_reward_closes_once_before_quick_switch_on_any_recent_cartridge(self):
+        for size, recent_pvp in (((1920, 1080), False), ((1280, 720), True)):
+            with self.subTest(size=size, recent_pvp=recent_pvp):
+                reward = self.reward_boxes(size)
+                task = self.make_task(
+                    [reward, reward, [], self.normal_boxes(), self.normal_boxes()],
+                    size=size, recent_pvp=recent_pvp,
+                )
+
+                def quick_switch():
+                    self.assertGreaterEqual(self.screen_index, 5)
+                    return True
+
+                confirm = Mock(return_value=True)
+                self.assertTrue(
+                    task.open_cartridge_quick_switcher(lambda: True, quick_switch, confirm)
+                )
+                self.assertEqual(2, len(self.clicks))
+                self.assertAlmostEqual(0.65, self.clicks[1][0])
+                self.assertAlmostEqual(0.77, self.clicks[1][1])
+                task.info_set.assert_any_call(FIEND_HUNT_REWARD_TITLE, "已确认关闭")
+                confirm.assert_called_once()
+
+    def test_reward_must_close_before_searching_quick_switch(self):
+        reward = self.reward_boxes()
+        for screens in ([reward], [reward, []], [reward, self.normal_boxes(), reward]):
+            with self.subTest(screens=screens):
+                task = self.make_task(screens)
+                quick = Mock(return_value=True)
+                confirm = Mock(return_value=True)
+                self.assertFalse(task.open_cartridge_quick_switcher(lambda: True, quick, confirm))
+                self.assertEqual(2, len(self.clicks))
+                quick.assert_not_called()
+                confirm.assert_not_called()
+                task._save_flow_diagnostic.assert_called_once_with("cartridge_quick_switch_failed")
+
+    def test_partial_or_cross_frame_reward_words_never_trigger_click(self):
+        title, action = self.reward_boxes()
+        for screens in ([[title]], [[action]], [[title], [action]]):
+            with self.subTest(screens=screens):
+                task = self.make_task(screens)
+                self.assertIs(
+                    CartridgeSpecialPageResult.BLOCKED,
+                    task._handle_recent_cartridge_special_pages(allow_pvp_pages=False),
+                )
+                self.assertEqual([], self.clicks)
+
+    def test_non_pvp_cartridge_does_not_act_on_pvp_pages(self):
+        task = self.make_task([[SimpleNamespace(name="恭喜晋级"), SimpleNamespace(name="确认")]])
+        self.assertIs(
+            CartridgeSpecialPageResult.ABSENT,
+            task._handle_recent_cartridge_special_pages(allow_pvp_pages=False),
+        )
+        self.assertEqual([], self.clicks)
+
+    def test_late_reward_recovers_after_quick_switch_timeout_without_reentering_home(self):
+        task = self.make_task([self.normal_boxes()])
+        home = Mock(return_value=True)
+        quick = Mock()
+
+        def click_quick():
+            if quick.call_count == 1:
+                screens = iter([self.reward_boxes(), self.normal_boxes(), self.normal_boxes()])
+                task._recent_cartridge_ocr_boxes = lambda: next(screens, self.normal_boxes())
+                return False
+            return True
+
+        quick.side_effect = click_quick
+        self.assertTrue(task.open_cartridge_quick_switcher(home, quick, lambda: True))
+        home.assert_called_once()
+        self.assertEqual(2, quick.call_count)
+        self.assertEqual(2, len(self.clicks))
+
+    def test_reward_after_lost_entry_retry_is_also_dismissed(self):
+        task = self.make_task([self.normal_boxes()])
+        home = Mock()
+
+        def confirm_home():
+            if home.call_count == 2:
+                screens = iter([self.reward_boxes(), self.normal_boxes(), self.normal_boxes()])
+                task._recent_cartridge_ocr_boxes = lambda: next(screens, self.normal_boxes())
+            return True
+
+        home.side_effect = confirm_home
+        quick = Mock(side_effect=[False, True])
+        self.assertTrue(task.open_cartridge_quick_switcher(home, quick, lambda: True))
+        self.assertEqual(3, len(self.clicks))
+        self.assertAlmostEqual(0.65, self.clicks[-1][0])
 
 
 class PVPTaskHelperTest(unittest.TestCase):
@@ -305,7 +445,7 @@ class PVPTaskHelperTest(unittest.TestCase):
             lambda: stages.append("pvp_template") or True
         )
         task._handle_recent_cartridge_special_pages = (
-            lambda: stages.append("dialog") or False
+            lambda **_kwargs: stages.append("dialog") or CartridgeSpecialPageResult.ABSENT
         )
 
         self.assertTrue(
@@ -348,7 +488,8 @@ class PVPTaskHelperTest(unittest.TestCase):
                     lambda: calls.append("pvp_template") or True
                 )
                 task._handle_recent_cartridge_special_pages = (
-                    lambda: calls.append("pvp_special_page") or True
+                    lambda **_kwargs: calls.append("pvp_special_page")
+                    or CartridgeSpecialPageResult.HANDLED
                 )
 
                 self.assertTrue(
@@ -373,7 +514,7 @@ class PVPTaskHelperTest(unittest.TestCase):
                     calls,
                 )
 
-    def test_all_recent_cartridge_tasks_skip_special_pages_for_non_pvp(self):
+    def test_all_recent_cartridge_tasks_check_fiend_reward_with_pvp_pages_disabled(self):
         for task_class in (
             PVPTask,
             SquareGoddessTask,
@@ -390,8 +531,8 @@ class PVPTaskHelperTest(unittest.TestCase):
                 task._recent_cartridge_is_pvp = (
                     lambda: calls.append("pvp_template") or False
                 )
-                task._handle_recent_cartridge_special_pages = lambda: self.fail(
-                    "non-PVP recent cartridge must never run special-page OCR"
+                task._handle_recent_cartridge_special_pages = Mock(
+                    return_value=CartridgeSpecialPageResult.ABSENT,
                 )
                 diagnostics = []
                 task._save_flow_diagnostic = diagnostics.append
@@ -422,6 +563,10 @@ class PVPTaskHelperTest(unittest.TestCase):
                 self.assertEqual(
                     ["cartridge_quick_switch_failed"],
                     diagnostics,
+                )
+                self.assertEqual(
+                    [call(allow_pvp_pages=False)] * 3,
+                    task._handle_recent_cartridge_special_pages.call_args_list,
                 )
 
     def test_common_cartridge_entry_fails_closed_when_pvp_template_errors(self):
@@ -460,7 +605,7 @@ class PVPTaskHelperTest(unittest.TestCase):
         task._sleep_after_recognition = lambda: self.fail(
             "settle delay must not run before home is confirmed"
         )
-        task._handle_recent_cartridge_special_pages = lambda: self.fail(
+        task._handle_recent_cartridge_special_pages = lambda **_kwargs: self.fail(
             "dialog must not be checked before home is confirmed"
         )
         task._recent_cartridge_is_pvp = lambda: self.fail(
@@ -480,7 +625,9 @@ class PVPTaskHelperTest(unittest.TestCase):
         task.operate_click = lambda *_args, **_kwargs: None
         task._sleep_after_recognition = lambda: None
         task._recent_cartridge_is_pvp = lambda: True
-        task._handle_recent_cartridge_special_pages = lambda: False
+        task._handle_recent_cartridge_special_pages = Mock(
+            return_value=CartridgeSpecialPageResult.ABSENT,
+        )
         status = []
         task.info_set = lambda key, value: status.append((key, value))
         diagnostics = []
@@ -513,7 +660,7 @@ class PVPTaskHelperTest(unittest.TestCase):
         calls = []
         task._recent_cartridge_is_pvp = lambda: True
         task._handle_recent_cartridge_special_pages = (
-            lambda: calls.append("dialog") or False
+            lambda **_kwargs: calls.append("dialog") or CartridgeSpecialPageResult.ABSENT
         )
         diagnostics = []
         task._save_flow_diagnostic = diagnostics.append
@@ -538,12 +685,14 @@ class PVPTaskHelperTest(unittest.TestCase):
         task.operate_click = lambda *_args, **_kwargs: None
         task._sleep_after_recognition = lambda: None
         task.info_set = lambda *_args, **_kwargs: None
-        special_pages = iter((False, True))
+        special_pages = iter(
+            (CartridgeSpecialPageResult.ABSENT, CartridgeSpecialPageResult.HANDLED)
+        )
         clicks = iter((False, True))
         calls = []
         task._recent_cartridge_is_pvp = lambda: True
         task._handle_recent_cartridge_special_pages = (
-            lambda: calls.append("dialog") or next(special_pages)
+            lambda **_kwargs: calls.append("dialog") or next(special_pages)
         )
 
         self.assertTrue(
@@ -565,8 +714,8 @@ class PVPTaskHelperTest(unittest.TestCase):
         task._sleep_after_recognition = lambda: calls.append("settle")
         task.info_set = lambda *_args, **_kwargs: None
         task._recent_cartridge_is_pvp = lambda: calls.append("template") or False
-        task._handle_recent_cartridge_special_pages = lambda: self.fail(
-            "non-PVP recent cartridge must skip PVP special-page OCR"
+        task._handle_recent_cartridge_special_pages = Mock(
+            return_value=CartridgeSpecialPageResult.ABSENT,
         )
 
         self.assertTrue(
@@ -580,16 +729,17 @@ class PVPTaskHelperTest(unittest.TestCase):
             ["home", "template", "settle", "entry", "quick", "confirm"],
             calls,
         )
+        task._handle_recent_cartridge_special_pages.assert_called_once_with(allow_pvp_pages=False)
 
-    def test_non_pvp_recent_cartridge_does_not_rescan_special_pages_after_timeout(self):
+    def test_non_pvp_recent_cartridge_rescans_fiend_reward_after_timeout(self):
         task = object.__new__(PVPTask)
         entry_clicks = []
         task.operate_click = lambda *_args, **_kwargs: entry_clicks.append("entry")
         task._sleep_after_recognition = lambda: None
         task.info_set = lambda *_args, **_kwargs: None
         task._recent_cartridge_is_pvp = lambda: False
-        task._handle_recent_cartridge_special_pages = lambda: self.fail(
-            "non-PVP recent cartridge must never scan PVP special pages"
+        task._handle_recent_cartridge_special_pages = Mock(
+            return_value=CartridgeSpecialPageResult.ABSENT,
         )
         diagnostics = []
         task._save_flow_diagnostic = diagnostics.append
@@ -605,6 +755,10 @@ class PVPTaskHelperTest(unittest.TestCase):
         )
         self.assertEqual(["entry", "entry"], entry_clicks)
         self.assertEqual(
+            [call(allow_pvp_pages=False)] * 3,
+            task._handle_recent_cartridge_special_pages.call_args_list,
+        )
+        self.assertEqual(
             ["cartridge_quick_switch_failed"],
             diagnostics,
         )
@@ -617,8 +771,8 @@ class PVPTaskHelperTest(unittest.TestCase):
         task._sleep_after_recognition = lambda: calls.append("settle")
         task.info_set = lambda *_args, **_kwargs: None
         task._recent_cartridge_is_pvp = lambda: calls.append("template") or False
-        task._handle_recent_cartridge_special_pages = lambda: self.fail(
-            "non-PVP recent cartridge must never scan PVP special pages"
+        task._handle_recent_cartridge_special_pages = Mock(
+            return_value=CartridgeSpecialPageResult.ABSENT,
         )
         diagnostics = []
         task._save_flow_diagnostic = diagnostics.append
@@ -653,8 +807,8 @@ class PVPTaskHelperTest(unittest.TestCase):
         task._sleep_after_recognition = lambda: calls.append("settle")
         task.info_set = lambda *_args, **_kwargs: None
         task._recent_cartridge_is_pvp = lambda: False
-        task._handle_recent_cartridge_special_pages = lambda: self.fail(
-            "non-PVP recent cartridge must never scan PVP special pages"
+        task._handle_recent_cartridge_special_pages = Mock(
+            return_value=CartridgeSpecialPageResult.ABSENT,
         )
         diagnostics = []
         task._save_flow_diagnostic = diagnostics.append
@@ -806,7 +960,8 @@ class PVPTaskHelperTest(unittest.TestCase):
                     (x, y, after_sleep)
                 )
 
-                self.assertTrue(
+                self.assertIs(
+                    CartridgeSpecialPageResult.HANDLED,
                     task._handle_recent_cartridge_special_pages(timeout=0.0)
                 )
                 center_x = action_rect[0] + action_rect[2] / 2
@@ -885,7 +1040,10 @@ class PVPTaskHelperTest(unittest.TestCase):
             "src.tasks.BaseBD2Task.monotonic",
             side_effect=(0.0, 0.5, 1.0, 3.1),
         ):
-            self.assertTrue(task._handle_recent_cartridge_special_pages(timeout=3.0))
+            self.assertIs(
+                CartridgeSpecialPageResult.HANDLED,
+                task._handle_recent_cartridge_special_pages(timeout=3.0),
+            )
 
         self.assertEqual(2, len(clicks))
 
