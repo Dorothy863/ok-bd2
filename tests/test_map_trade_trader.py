@@ -2649,6 +2649,9 @@ class BuyPhaseAndClassifyTest(unittest.TestCase):
         )
         trader.rebuild_favorites = lambda: actions.append(("rebuild",)) or True
         trader.buy_all_favorites = lambda: actions.append(("buy-all",)) or True
+        trader._wait_for_buy_all_favorites_state = lambda: (
+            (1454, 1004), np.zeros((1080, 1920, 3), dtype=np.uint8)
+        )
 
         self.assertTrue(trader.run_buy())
         self.assertEqual(
@@ -2712,6 +2715,39 @@ class BuyPhaseAndClassifyTest(unittest.TestCase):
             ],
             actions,
         )
+
+    def test_buy_phase_skips_sold_out_before_rebuilding_favorites(self):
+        frame = np.zeros((1080, 1920, 3), dtype=np.uint8)
+        sold_out = MatchResult(0.99, (560, 230), (30, 18), pixel_score=0.99, zncc_score=0.99)
+        for button_visible in (True, False):
+            with self.subTest(button_visible=button_visible):
+                trader = object.__new__(Trader)
+                trader.task = SimpleNamespace(
+                    config={"收藏重建周期": "每次"},
+                    sleep=lambda *_args: None,
+                    log_info=lambda *_args: None,
+                    log_warning=lambda message: self.fail(message),
+                )
+                trader.now_provider = lambda: datetime(2026, 9, 10, 20, tzinfo=UTC_PLUS_8)
+                trader.navigator = SimpleNamespace(
+                    enter_q_sp6_buy_flow=lambda: NavigationResult(True, ScreenState.SHOP)
+                )
+                trader.rebuild_favorites = lambda: self.fail("售罄后不应切卡重建收藏")
+                trader.buy_all_favorites = lambda: self.fail("售罄后不应继续购买")
+                trader.vision = SimpleNamespace(
+                    capture=lambda: frame,
+                    ocr_boxes=lambda *_args: [
+                        SimpleNamespace(
+                            name="一键购买全部收藏", x=1377, y=990, width=152, height=28
+                        )
+                    ] if button_visible else [],
+                    simplify=lambda value: value,
+                    match=lambda *_args: sold_out,
+                    passes=lambda *_args: True,
+                )
+
+                self.assertTrue(trader.run_buy())
+                self.assertTrue(trader._buy_completed_in_current_shop)
 
     def test_phase_failure_stops_later_phases(self):
         actions = []
@@ -2816,7 +2852,7 @@ class BuyPhaseAndClassifyTest(unittest.TestCase):
                 (point, shape, after_sleep)
             )
         )
-        trader._wait_for_buy_all_favorites_button = lambda: ((1454, 1004), frame)
+        trader._wait_for_buy_all_favorites_state = lambda: ((1454, 1004), frame)
         trader._wait_for_purchase_confirmation = lambda: True
 
         self.assertTrue(trader.buy_all_favorites())
@@ -2871,9 +2907,11 @@ class BuyPhaseAndClassifyTest(unittest.TestCase):
                 ocr_calls.append((captured.shape, name)) or next(boxes)
             ),
             simplify=lambda value: value,
+            match=lambda *_args: MatchResult(-1.0, (0, 0), (0, 0)),
+            passes=lambda *_args: False,
         )
 
-        located = trader._wait_for_buy_all_favorites_button()
+        located = trader._wait_for_buy_all_favorites_state()
 
         self.assertIsNotNone(located)
         point, located_frame = located
@@ -2887,6 +2925,55 @@ class BuyPhaseAndClassifyTest(unittest.TestCase):
             ("一键购买全部收藏按钮 OCR稳定", "2/2"),
             statuses[-1],
         )
+
+    def test_buy_all_favorites_prioritizes_same_frame_sold_out_over_visible_button(self):
+        for sold_out_frames, should_buy in (
+            ((True, True), False),
+            ((False, True, True), False),
+            ((True, False, True, True), False),
+            ((False, True, False, False), True),
+        ):
+            with self.subTest(sold_out_frames=sold_out_frames):
+                frames = [
+                    np.full((2, 2, 3), index, dtype=np.uint8)
+                    for index in range(len(sold_out_frames))
+                ]
+                captures = iter(frames)
+                ocr_frames = []
+                template_frames = []
+                clicks = []
+                trader = object.__new__(Trader)
+                trader.task = SimpleNamespace(
+                    sleep=lambda *_args: None,
+                    operate_click=lambda *_args, **_kwargs: clicks.append("confirm"),
+                    log_info=lambda *_args: None,
+                    log_warning=lambda message: self.fail(message),
+                )
+
+                def match(frame, spec):
+                    self.assertIs(spec, BUY_TO_SELL_SOLD_OUT_TEMPLATE)
+                    template_frames.append(frame)
+                    matched = sold_out_frames[int(frame[0, 0, 0])]
+                    return MatchResult(float(matched), (0, 0), (1, 1))
+
+                trader.vision = SimpleNamespace(
+                    capture=lambda: next(captures),
+                    ocr_boxes=lambda frame, _name: ocr_frames.append(frame) or [
+                        SimpleNamespace(name="一键购买全部收藏", x=0, y=0, width=2, height=2)
+                    ],
+                    simplify=lambda value: value,
+                    match=match,
+                    passes=lambda result, _spec: result.score == 1.0,
+                    click_client=lambda *_args, **_kwargs: clicks.append("buy"),
+                )
+                trader._wait_for_purchase_confirmation = lambda: True
+
+                self.assertTrue(trader.buy_all_favorites())
+                self.assertEqual(["buy", "confirm"] if should_buy else [], clicks)
+                self.assertEqual(len(sold_out_frames), len(ocr_frames))
+                self.assertEqual(len(ocr_frames), len(template_frames))
+                for ocr_frame, template_frame in zip(ocr_frames, template_frames):
+                    self.assertIs(ocr_frame, template_frame)
 
     def test_purchase_confirmation_requires_both_texts_in_given_region(self):
         ocr_calls = []
@@ -2932,7 +3019,7 @@ class BuyPhaseAndClassifyTest(unittest.TestCase):
                 (point, shape, after_sleep)
             )
         )
-        trader._wait_for_buy_all_favorites_button = lambda: ((969, 669), frame)
+        trader._wait_for_buy_all_favorites_state = lambda: ((969, 669), frame)
         trader._wait_for_purchase_confirmation = lambda: False
 
         self.assertFalse(trader.buy_all_favorites())
