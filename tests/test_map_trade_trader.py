@@ -2054,14 +2054,17 @@ class BuyEntryTest(unittest.TestCase):
         self.assertEqual((191 / 1920, 900 / 1080), BARGAIN_POINT)
         self.assertEqual((1047 / 1920, 652 / 1080), BARGAIN_CONFIRM_POINT)
         self.assertEqual("image/green/QuickSwitchPlayIco.png", QUICK_SWITCH_TEMPLATE.file_name)
-        self.assertEqual((0.25, 0.85, 0.65, 1.0), QUICK_SWITCH_TEMPLATE.relative_roi)
+        self.assertEqual(
+            ((0.15, 0.85, 0.65, 1.0), (0.16, 0.08, 0.24, 0.19)),
+            QUICK_SWITCH_TEMPLATE.relative_rois,
+        )
         self.assertEqual((0.95, 0.975, 1.0, 1.025, 1.05), QUICK_SWITCH_TEMPLATE.scale_ratios)
         self.assertEqual(0.85, QUICK_SWITCH_TEMPLATE.min_pixel_score)
         self.assertEqual(0.88, QUICK_SWITCH_TEMPLATE.minimum_safe_threshold)
         # BUG-20260902-06：广场内暗色圆底按钮 1600x901 实测 zncc 最高 0.838，
         # 误检位置最高 0.43；0.78 在两者之间有足够余量。
         self.assertEqual(0.78, QUICK_SWITCH_TEMPLATE.min_zncc_score)
-        self.assertIsNotNone(QUICK_SWITCH_TEMPLATE.candidate_center_roi)
+        self.assertIsNone(QUICK_SWITCH_TEMPLATE.candidate_center_roi)
 
     def test_merchant_interaction_uses_location_match_center(self):
         frame = np.zeros((1080, 1920, 3), dtype=np.uint8)
