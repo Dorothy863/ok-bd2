@@ -686,6 +686,15 @@ class RunPanelTest(QuestUiTestBase):
         self.assertEqual(run_state(task), "abort")
         task.info = {"Error": "x"}
         self.assertEqual(run_state(task), "fail")
+        for info in (
+            {"状态": "战斗结算或离开失败。"},
+            {"状态": "跑商部分流程未完成。", "失败": "买"},
+            {"状态": "公会、小屋、酒馆结束。", "失败": "['公会签到']"},
+            {"结果": "失败"},
+        ):
+            with self.subTest(info=info):
+                task.info = info
+                self.assertEqual(run_state(task), "fail")
         task.enabled = True
         self.assertEqual(run_state(task), "run")
         task.paused = True

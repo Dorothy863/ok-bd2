@@ -2,6 +2,7 @@ import os
 import tempfile
 import unittest
 from datetime import datetime
+from types import SimpleNamespace
 
 from src.tasks.run_history import (
     BEIJING_TZ,
@@ -104,6 +105,86 @@ class RunHistoryStoreTest(unittest.TestCase):
         task = _TaskStub("一键完成日常", info={"状态": "一键完成日常中止。"})
         self.store.record_task_done(task, finished=2000.0)
         self.assertFalse(self.store.last_run("一键完成日常")["ok"])
+
+    def test_neutral_status_with_failure_count_marks_run_failed(self):
+        task = _TaskStub(
+            "公会、小屋、酒馆",
+            info={"状态": "公会、小屋、酒馆结束。", "完成": "[]", "失败": "['公会签到']"},
+        )
+        self.store.record_task_done(task, finished=2000.0)
+        self.assertFalse(self.store.last_run("公会、小屋、酒馆")["ok"])
+
+    def test_neutral_status_with_failed_phase_names_marks_run_failed(self):
+        # MapTradeTask/MapCollectionTask report "…部分流程未完成。" with the
+        # failed phase names in the 失败 key.
+        task = _TaskStub(
+            "每日跑商",
+            info={"状态": "跑商部分流程未完成。", "完成": "-", "失败": "跑商买入", "跳过": "-"},
+        )
+        self.store.record_task_done(task, finished=2000.0)
+        self.assertFalse(self.store.last_run("每日跑商")["ok"])
+
+    def test_result_key_failure_marks_run_failed(self):
+        # BargainLevelTask writes the verdict into 结果 instead of 状态.
+        task = _TaskStub(
+            "刷砍价等级",
+            info={"状态": "页面文字确认超时，任务结束。", "结果": "失败"},
+        )
+        self.store.record_task_done(task, finished=2000.0)
+        self.assertFalse(self.store.last_run("刷砍价等级")["ok"])
+
+    def test_placeholder_failure_values_still_count_as_success(self):
+        task = _TaskStub(
+            "每日跑商",
+            info={"状态": "跑商完成。", "完成": "跑商买入", "失败": "-", "跳过": "-"},
+        )
+        self.store.record_task_done(task, finished=2000.0)
+        self.assertTrue(self.store.last_run("每日跑商")["ok"])
+
+        task = _TaskStub(
+            "公会、小屋、酒馆",
+            info={"状态": "公会、小屋、酒馆结束。", "完成": "3", "失败": "0", "跳过": "0"},
+        )
+        self.store.record_task_done(task, finished=2100.0)
+        self.assertTrue(self.store.last_run("公会、小屋、酒馆")["ok"])
+
+    def test_pvp_and_goddess_failed_runs_remain_due_for_retry(self):
+        from src.tasks.PVPTask import PVPTask
+        from src.tasks.scheduler import TaskScheduleStore
+        from src.tasks.SquareGoddessTask import SquareGoddessTask
+
+        finished = _beijing_ts(2026, 9, 12, 12)
+        for task_class, methods in (
+            (PVPTask, ("_ensure_pvp_hub", "_start_auto_battle", "_wait_result_and_leave")),
+            (SquareGoddessTask, (
+                "_enter_square_from_home", "_pray_at_goddess", "_return_home_from_square",
+            )),
+        ):
+            for failed_method in methods:
+                with self.subTest(task=task_class.__name__, failed=failed_method):
+                    info = {}
+                    task = SimpleNamespace(
+                        config={}, info=info, start_time=finished - 10,
+                        name="镜中之战" if task_class is PVPTask else "广场女神像",
+                        info_set=lambda key, value: info.__setitem__(key, value),
+                        _status_set=lambda key, value: info.__setitem__(key, value),
+                        log_info=lambda *args, **kwargs: None,
+                        _target_multiplier=lambda: 4,
+                    )
+                    for method in methods:
+                        value = False if method == failed_method else True
+                        if method == "_start_auto_battle":
+                            value = "failed" if method == failed_method else "started"
+                        setattr(task, method, lambda *args, value=value: value)
+                    self.assertFalse(task_class.run(task))
+                    self.store.record_task_done(task, finished=finished)
+                    record = self.store.last_run(task.name)
+                    self.assertFalse(record["ok"])
+                    self.assertFalse(self.store.is_completed_today(task.name, now=finished))
+                    schedule = TaskScheduleStore(os.path.join(self.dir, "schedule.json"))
+                    retry_at = schedule.delay_after_run(task.name, ok=record["ok"], now=finished)
+                    self.assertGreater(retry_at, finished)
+                    self.assertLess(retry_at, _beijing_ts(2026, 9, 13, 4))
 
     def test_is_completed_today_respects_4am_boundary(self):
         task = _TaskStub("广场女神像", info={"状态": "ok"})

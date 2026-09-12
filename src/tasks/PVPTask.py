@@ -229,7 +229,7 @@ class PVPTask(BaseBD2Task):
         self.log_info(f"镜中之战：目标倍率 {target_multiplier}。")
 
         if not self._ensure_pvp_hub():
-            self.info_set("状态", "未能进入 PVP 箱庭。")
+            self.info_set("状态", "镜中之战失败：未能进入 PVP 箱庭。")
             return False
 
         current_multiplier = target_multiplier
@@ -251,7 +251,7 @@ class PVPTask(BaseBD2Task):
                 self.log_completion("镜中之战：1 倍 AP 仍不足，流程结束。")
                 return True
             if start_state != "started":
-                self.info_set("状态", "未能开始战斗。")
+                self.info_set("状态", "镜中之战失败：未能开始战斗。")
                 return False
 
             if not self._wait_result_and_leave(current_multiplier):
@@ -691,6 +691,12 @@ class PVPTask(BaseBD2Task):
                     f"镜中之战：免费AP开关第{attempt}/"
                     f"{PVP_CLICK_VERIFY_ATTEMPTS}次点击后未确认开启，重试。"
                 )
+
+        # 末次点击的效果只能在循环外回读，否则"前几次被吞、末次生效"
+        # 会被误报为失败（BUG-20260912-02）。
+        if self._free_ap_switch_on():
+            self.info_set("PVP 免费AP", "已开启")
+            return True
 
         self.info_set("PVP 免费AP", "未确认")
         self.log_info("镜中之战：未能确认仅用免费鸡尾酒开关。")

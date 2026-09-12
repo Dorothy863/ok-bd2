@@ -170,19 +170,19 @@ class SquareGoddessTask(BaseBD2Task):
         self.info_set("状态", "广场女神像启动。")
         self.log_info("广场女神像：开始从主页进入梦幻广场。")
         if not self._enter_square_from_home():
-            self.info_set("状态", "未能进入梦幻广场。")
+            self.info_set("状态", "广场女神像失败：未能进入梦幻广场。")
             return False
 
         self.info_set("状态", "已进入梦幻广场，开始寻找女神像。")
         if not self._pray_at_goddess():
-            self.info_set("状态", "未能完成女神像许愿。")
+            self.info_set("状态", "广场女神像失败：未能完成女神像许愿。")
             self._status_set("女神像许愿结果", "失败")
             return False
 
         self.info_set("状态", "女神像许愿完成。")
         self._status_set("女神像许愿结果", "完成")
         if not self._return_home_from_square():
-            self.info_set("状态", "女神像许愿完成，但未能返回主页。")
+            self.info_set("状态", "广场女神像失败：许愿完成，但未能返回主页。")
             return False
         self.info_set("状态", "女神像许愿完成并返回主页。")
         self.log_completion("广场女神像：许愿完成并返回主页。")

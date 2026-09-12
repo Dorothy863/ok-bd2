@@ -251,6 +251,36 @@ class CalendarTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "未知商店"):
             parse_manual_calendar(self._manual("8=透明沙拉@不存在"))
 
+    def test_calendar_accepts_actual_event_numbering_and_rejects_old_pairs(self):
+        # 实机编号：记忆边缘为 E5、戏水女王为 E7；旧表的 E4/E5 编号必须拒绝。
+        def payload_with(shop: str) -> str:
+            return json.dumps(
+                {
+                    "schema_version": 1,
+                    "timezone": "Asia/Shanghai",
+                    "updated_at": "2026-09-12T00:00:00+08:00",
+                    "days": {
+                        str(day): [{"item": "戏水券", "shop": shop}] if day == 7 else []
+                        for day in range(1, 32)
+                    },
+                }
+            )
+
+        for shop in ("E7:戏水女王", "E7", "E5:记忆边缘", "E5"):
+            with self.subTest(shop=shop):
+                loaded = parse_calendar_payload(payload_with(shop), "test")
+                self.assertEqual(
+                    (
+                        "E7:戏水女王" if shop.startswith("E7") else "E5:记忆边缘",
+                    ),
+                    tuple(entry.shop for entry in loaded.entries_for(7)),
+                )
+
+        for shop in ("E4:记忆边缘", "E4", "E5:戏水女王"):
+            with self.subTest(shop=shop):
+                with self.assertRaisesRegex(ValueError, "未知商店"):
+                    parse_calendar_payload(payload_with(shop), "test")
+
     def test_bundled_calendar_is_the_default_and_skips_online_sources(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             temp = Path(temp_dir)
@@ -376,6 +406,31 @@ class CalendarTest(unittest.TestCase):
 
             self.assertEqual("cache", loaded.source)
             fetch.assert_called_once_with(url, etag='"etag-v1"')
+
+    def test_month_end_cache_uses_sale_month_after_online_download(self):
+        payload = BUNDLED_CALENDAR.read_bytes()
+        for written, read_at in (
+            (datetime(2026, 7, 31, 23, 30, tzinfo=UTC_PLUS_8),
+             datetime(2026, 8, 1, 0, 30, tzinfo=UTC_PLUS_8)),
+            (datetime(2026, 12, 31, 23, 30, tzinfo=UTC_PLUS_8),
+             datetime(2027, 1, 1, 0, 30, tzinfo=UTC_PLUS_8)),
+        ):
+            with self.subTest(written=written), tempfile.TemporaryDirectory() as temp_dir:
+                client = self._offline_client(Path(temp_dir), None, written)
+                with patch.object(client, "_fetch", return_value=(
+                    parse_calendar_payload(payload), payload, '"new"',
+                )):
+                    client.load(use_bundled=False, use_online=True)
+                for now in (written, read_at):
+                    client.now_provider = lambda now=now: now
+                    with patch.object(client, "_fetch", side_effect=OSError("offline")):
+                        self.assertEqual("cache", client.load(use_bundled=False).source)
+
+                expired_at = written + MAX_CALENDAR_CACHE_AGE + timedelta(seconds=1)
+                client.now_provider = lambda: expired_at
+                with patch.object(client, "_fetch", side_effect=OSError("offline")):
+                    with self.assertRaisesRegex(RuntimeError, "本地缓存已过期"):
+                        client.load(use_bundled=False)
 
     def test_http_304_with_stale_cache_drops_etag_and_refetches(self):
         payload_bytes = BUNDLED_CALENDAR.read_bytes()

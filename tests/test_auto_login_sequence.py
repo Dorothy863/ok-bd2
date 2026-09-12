@@ -489,6 +489,59 @@ class AutoLoginSequenceTest(unittest.TestCase):
         self.assertFalse(AutoLoginTask.run(task))
         self.assertEqual([], info_calls)
 
+    def test_clearing_state_still_enforces_login_wait_budget(self):
+        # 进入 clearing 后总预算继续有效：三信号长时间凑不齐时走统一的
+        # 超时重置+退避，而不是无界点击公告清理位置（BUG-20260912-04）。
+        task = self._task()
+        task._state = "clearing"
+        task._login_clicked_at = monotonic() - 301.0
+        statuses = {}
+        task.info_set = lambda key, value: statuses.__setitem__(key, value)
+        warnings = []
+        task.log_warning = lambda message, notify=False: warnings.append(
+            (message, notify)
+        )
+        task.capture_frame = lambda: np.zeros((10, 10, 3), dtype=np.uint8)
+        cleared = []
+        task._clear_popups_until_home = (
+            lambda *_args, **_kwargs: cleared.append(1) or False
+        )
+
+        self.assertFalse(AutoLoginTask.run(task))
+
+        self.assertEqual([], cleared)
+        self.assertEqual("waiting", task._state)
+        self.assertIsNone(task._login_clicked_at)
+        self.assertEqual("登录后等待主页超时", statuses["状态"])
+        self.assertEqual(1, len(warnings))
+        self.assertIn("超时", warnings[0][0])
+        self.assertGreaterEqual(
+            task._login_retry_not_before,
+            monotonic() + 60.0 - 1.0,
+        )
+
+    def test_clearing_state_keeps_login_click_timestamp(self):
+        # home 模板命中进入 clearing 时不得清空登录点击时间戳，否则
+        # _login_wait_timed_out 永远失效（BUG-20260912-04）。
+        task = self._task()
+        task._state = "waiting_home"
+        clicked_at = monotonic()
+        task._login_clicked_at = clicked_at
+        task._match = lambda _frame, spec: (
+            MatchResult(0.9, (100, 100), (60, 60), pixel_score=0.9)
+            if spec is HOME_BUTTON_TEMPLATE
+            else MatchResult(-1.0, (0, 0), (0, 0), pixel_score=-1.0)
+        )
+        task._clear_popups_until_home = lambda *_args, **_kwargs: False
+
+        AutoLoginTask._wait_loading_then_home(
+            task,
+            np.zeros((10, 10, 3), dtype=np.uint8),
+        )
+
+        self.assertEqual("clearing", task._state)
+        self.assertEqual(clicked_at, task._login_clicked_at)
+
     def test_run_resumes_login_flow_after_backoff_expires(self):
         task = self._task()
         task._state = "waiting"

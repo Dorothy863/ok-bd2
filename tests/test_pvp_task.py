@@ -2597,6 +2597,25 @@ class PVPTaskHelperTest(unittest.TestCase):
             clicks,
         )
 
+    def test_ensure_free_ap_enabled_readback_confirms_last_click(self):
+        # 末次点击生效时不能误报失败：循环外必须回读一次开关状态
+        # （BUG-20260912-02）。
+        task = object.__new__(PVPTask)
+        task.info_set = lambda *_args, **_kwargs: None
+        task.log_info = lambda *_args, **_kwargs: None
+        switch = {"on": False, "clicks": 0}
+
+        def fake_click(x, y, after_sleep=0.0):
+            switch["clicks"] += 1
+            if switch["clicks"] >= PVP_CLICK_VERIFY_ATTEMPTS:
+                switch["on"] = True
+
+        task._free_ap_switch_on = lambda: switch["on"]
+        task._click_screen_reference = fake_click
+
+        self.assertTrue(PVPTask._ensure_free_ap_enabled(task))
+        self.assertEqual(PVP_CLICK_VERIFY_ATTEMPTS, switch["clicks"])
+
     def _make_multiplier_harness(self, swallow_button=False, swallow_option=False):
         task = object.__new__(PVPTask)
         task.config = {}

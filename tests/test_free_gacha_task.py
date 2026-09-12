@@ -62,6 +62,32 @@ class FreeGachaTaskHelperTest(unittest.TestCase):
         self.assertEqual(["白嫖抽抽乐入口前主页确认"], confirmations)
         self.assertIn(("状态", "白嫖抽抽乐入口前主页确认失败。"), statuses)
 
+    def test_run_failure_paths_write_failure_status(self):
+        # 中途失败的路径必须把"失败"写进状态，否则 run_history 会把本次
+        # 运行记成成功、调度账本当天不再补跑（BUG-20260912-01）。
+        cases = [
+            ("stuck", True, "白嫖抽抽乐进入抽卡页失败。"),
+            ("target", False, "白嫖抽抽乐进入抽卡页失败。"),
+        ]
+        for loading_state, gacha_found, expected_status in cases:
+            with self.subTest(loading_state=loading_state):
+                task = object.__new__(FreeGachaTask)
+                task.config = {"启用": True}
+                statuses = []
+                task.info_set = lambda key, value: statuses.append((key, value))
+                task.log_info = lambda *_args, **_kwargs: None
+                task._click_reference = lambda *_args, **_kwargs: None
+                task._wait_for_home_confirmation = lambda *_args, **_kwargs: True
+                task._wait_loading_or_gacha_page = lambda *_args, **_kwargs: (
+                    loading_state,
+                    gacha_found,
+                    "",
+                )
+                task._wait_for_gacha_page = lambda *_args, **_kwargs: False
+
+                self.assertFalse(FreeGachaTask.run(task))
+                self.assertIn(("状态", expected_status), statuses)
+
     def test_keyword_match_count_ignores_spaces_and_case(self):
         text = "So PERFECT！ 简直是无可挑剔的 masterpiece…！"
 

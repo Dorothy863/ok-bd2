@@ -17,6 +17,7 @@ from src.tasks.map_trade.data import (
 )
 from src.tasks.map_trade.models import (
     COLLECTABLE_CARDS,
+    KNOWN_SHOPS,
     PINNED_CARD_IDS,
     STORY_COLLECTION_MAPS,
     CollectionMapRole,
@@ -149,6 +150,27 @@ class ShopAndCatalogTest(unittest.TestCase):
         self.assertTrue((template_root / "shop/cartridges/star_gray.png").is_file())
         with self.assertRaisesRegex(KeyError, "未知商品卡带"):
             shop_purchase_reference("E4:旧编号")
+
+    def test_event_shop_labels_align_with_actual_cartridge_numbers(self):
+        # 实机编号：记忆边缘为活动游戏卡5、戏水女王为活动游戏卡7；旧表把
+        # 戏水女王编为 E5，会让 E7 价表被拒、E5 价表导航到错误卡带。
+        self.assertEqual(
+            ("E5:记忆边缘", "E7:戏水女王"),
+            (KNOWN_SHOPS["E5"], KNOWN_SHOPS["E7"]),
+        )
+        self.assertNotIn("E4", KNOWN_SHOPS)
+        self.assertEqual(
+            SHOP_PURCHASE_REFERENCES["E7"],
+            shop_purchase_reference("E7:戏水女王"),
+        )
+        self.assertEqual(
+            "活动游戏卡7 戏水女王",
+            shop_purchase_reference("E7:戏水女王").label,
+        )
+        self.assertEqual(
+            "活动游戏卡5 记忆边缘",
+            shop_purchase_reference("E5:记忆边缘").label,
+        )
 
     def test_shop_cartridge_pages_preserve_supplied_scroll_calibration(self):
         expected_pages = (

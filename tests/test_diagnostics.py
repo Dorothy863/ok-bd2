@@ -154,8 +154,107 @@ class DiagnosticRedactorTest(unittest.TestCase):
         self.assertIn("bot_secret=<REDACTED>", result)
         self.assertIn("db_password=<REDACTED>", result)
 
+    def test_redacts_suffixed_credential_keys_userinfo_urls_and_scheme_values(self):
+        redactor = DiagnosticRedactor()
+        source = (
+            "Token = abc123secret secret_key = 'quoted-secret' "
+            "password_hash: hashvalue api_key=Bearer, "
+            "https://user:pass@host/path "
+            "https://alice:tok@example.test/x?account=42"
+        )
+
+        result = redactor.redact(source)
+
+        for secret in (
+            "abc123secret",
+            "quoted-secret",
+            "hashvalue",
+            "user:pass",
+            "alice:tok",
+            "account=42",
+        ):
+            self.assertNotIn(secret, result)
+        self.assertIn("Token = <REDACTED>", result)
+        self.assertIn("secret_key = <REDACTED>", result)
+        self.assertIn("password_hash: <REDACTED>", result)
+        # 值恰好是认证 scheme（无后续凭据）时仍按键值对脱敏。
+        self.assertIn("api_key=<REDACTED>,", result)
+        self.assertIn("https://<REDACTED>@host/path", result)
+        self.assertIn("https://<REDACTED>@example.test/x?<REDACTED_QUERY>", result)
+
+    def test_windows_path_redaction_follows_spaced_segments_only(self):
+        redactor = DiagnosticRedactor()
+
+        result = redactor.redact(
+            r"Log dir C:\Program Files\ok-bd2\logs\ok-bd2.log rotated"
+        )
+
+        self.assertNotIn("C:\\Program", result)
+        self.assertNotIn("ok-bd2\\logs", result)
+        # 空格续段只到分隔符链结束；路径后的普通文字保持原样。
+        self.assertIn("<PATH>/ok-bd2.log rotated", result)
+
+    def test_quoted_windows_path_keeps_text_outside_quotes(self):
+        redactor = DiagnosticRedactor()
+
+        result = redactor.redact(
+            r'loaded "C:\Program Files\ok-bd2\logs\ok-bd2.log" ok'
+        )
+
+        self.assertNotIn("Program Files", result)
+        self.assertIn('"<PATH>/ok-bd2.log" ok', result)
+
+    def test_redaction_keeps_plain_sentences_untouched(self):
+        redactor = DiagnosticRedactor()
+        text = (
+            "任务执行完成，共扫描 12 个关卡，全部通过。"
+            "The build passed all checks today."
+        )
+
+        self.assertEqual(text, redactor.redact(text))
+
 
 class DiagnosticsManagerTest(unittest.TestCase):
+    def test_prepare_failure_restores_only_its_own_pause(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            manager = DiagnosticsManager(
+                project_root=Path(temp_dir), output_dir=Path(temp_dir), app_version="test",
+            )
+            for already_paused, fail_at_pause in ((False, True), (False, False), (True, False)):
+                with self.subTest(already_paused=already_paused, fail_at_pause=fail_at_pause):
+                    executor = _ExecutorStub(None, _InteractionStub(), paused=already_paused)
+                    error = RuntimeError("prepare failed")
+
+                    def failing_pause():
+                        executor.paused = True
+                        raise error
+
+                    target = (
+                        patch.object(executor, "pause", side_effect=failing_pause)
+                        if fail_at_pause else
+                        patch("src.diagnostics.service._task_snapshot", side_effect=error)
+                    )
+                    with target, self.assertRaises(RuntimeError) as raised:
+                        manager.prepare(executor=executor)
+                    self.assertIs(error, raised.exception)
+                    self.assertEqual(already_paused, executor.paused)
+                    self.assertEqual(0 if already_paused else 1, executor.start_calls)
+
+    def test_prepare_reports_when_restoring_running_state_also_fails(self):
+        executor = _ExecutorStub(None, _InteractionStub())
+        with tempfile.TemporaryDirectory() as temp_dir:
+            manager = DiagnosticsManager(
+                project_root=Path(temp_dir), output_dir=Path(temp_dir), app_version="test",
+            )
+            with (
+                patch(
+                    "src.diagnostics.service._task_snapshot", side_effect=RuntimeError("snapshot"),
+                ),
+                patch.object(executor, "start", side_effect=RuntimeError("resume")),
+                self.assertRaisesRegex(RuntimeError, "请手动继续任务"),
+            ):
+                manager.prepare(executor=executor)
+
     def test_prepare_captures_before_pause_waits_for_mouse_and_can_resume(self):
         frame = np.full((24, 32, 3), 127, dtype=np.uint8)
         interaction = _InteractionStub()
