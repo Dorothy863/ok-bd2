@@ -1,4 +1,5 @@
 import unittest
+from dataclasses import replace
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -6,6 +7,7 @@ import numpy as np
 
 from src.tasks.map_trade.models import MatchResult, TemplateSpec
 from src.tasks.SquareGoddessTask import (
+    FANTASIA_SQUARE_TEMPLATE,
     GODDESS_DAILY_REGION,
     GODDESS_NAVIGATION_MINIMUM_HITS,
     GODDESS_NAVIGATION_TARGET,
@@ -21,6 +23,7 @@ from src.tasks.SquareGoddessTask import (
     SquareGoddessTask,
 )
 from src.utils.cartridge_quick_switch import (
+    FIXED_CARTRIDGE_SLOT_PRE_CLICK_DELAY_SECONDS,
     GAMEPLAY_CATEGORY_HIGHLIGHT_MIN_RATIO,
     LIFE_GAMEPLAY_CATEGORY_HIGHLIGHT_REGION,
     LIFE_GAMEPLAY_CATEGORY_LABEL,
@@ -68,12 +71,11 @@ class SquareGoddessEntryTest(unittest.TestCase):
         self.assertFalse(SquareGoddessTask._wait_for_cartridge_home(task))
         self.assertEqual([(169 / 1920, 615 / 1080, 0.2)], announcement_clicks)
 
-    def test_entry_ocr_card_unique_click_or_safe_stop(self):
+    def test_entry_uses_quick_switch_life_gameplay_and_fixed_second_slot(self):
         task = object.__new__(SquareGoddessTask)
-        task.config = {"广场 OCR 阈值": 0.2, "广场卡带OCR最大尝试次数": 3}
+        task.config = {}
         task.info_set = lambda *_args, **_kwargs: None
         task.log_info = lambda *_args, **_kwargs: None
-        task.log_warning = lambda *_args, **_kwargs: None
         stages = []
 
         task._wait_for_cartridge_home = lambda: stages.append("home") or True
@@ -90,42 +92,46 @@ class SquareGoddessEntryTest(unittest.TestCase):
             )
 
         task.open_cartridge_quick_switcher = open_quick_switcher
-        task.sleep = lambda *_args, **_kwargs: None
-        frame = np.full((1080, 1920, 3), 255, dtype=np.uint8)
-        task.capture_frame = lambda: frame
-        ocr_boxes = {"value": []}
-        task.ocr = (
-            lambda *_args, **_kwargs: list(ocr_boxes["value"])
-        )
+        sleeps = []
+        task.sleep = lambda seconds: sleeps.append(seconds)
         clicks = []
-        task.operate_click = lambda x, y, **kwargs: clicks.append(
-            (x, y, kwargs.get("after_sleep", 0.0))
+        task.operate_click = (
+            lambda x, y, after_sleep=0: clicks.append((x, y, after_sleep))
         )
         task._wait_for_life_gameplay_category = lambda: stages.append("highlight") or True
         task._wait_for_template = (
             lambda spec, **_kwargs: stages.append(("square", spec)) or True
         )
 
-        # OCR 唯一命中 FANTASIA -> 点卡带中心 -> 等梦幻广场 -> 成功
-        ocr_boxes["value"] = [
-            SimpleNamespace(name="FANTASIA SQUARE", x=300, y=900, width=120, height=80)
-        ]
         self.assertTrue(SquareGoddessTask._enter_square_from_home(task))
         self.assertEqual(
-            ["home", "quick", "page", "highlight"],
-            [item[0] if isinstance(item, tuple) else item for item in stages[:4]],
+            [
+                "home",
+                (
+                    "quick",
+                    replace(
+                        QUICK_SWITCH_TEMPLATE,
+                        roi=None,
+                        candidate_center_roi=None,
+                    ),
+                ),
+                "page",
+            ],
+            stages[:3],
         )
         self.assertEqual(
-            [(*LIFE_GAMEPLAY_CATEGORY_POINT, 0.0), (360 / 1920, 940 / 1080, 0.0)],
+            [0.5, FIXED_CARTRIDGE_SLOT_PRE_CLICK_DELAY_SECONDS],
+            sleeps,
+        )
+        self.assertEqual(
+            [
+                (*LIFE_GAMEPLAY_CATEGORY_POINT, 0.0),
+                (*SQUARE_CARTRIDGE_SLOT_POINT, 0.0),
+            ],
             clicks,
         )
-
-        # OCR 未命中 -> 重试后安全停止，绝不点固定 2 号位
-        stages.clear()
-        clicks.clear()
-        ocr_boxes["value"] = []
-        self.assertFalse(SquareGoddessTask._enter_square_from_home(task))
-        self.assertEqual([(*LIFE_GAMEPLAY_CATEGORY_POINT, 0.0)], clicks)
+        self.assertIn("highlight", stages)
+        self.assertIn(("square", FANTASIA_SQUARE_TEMPLATE), stages)
 
     def test_fixed_points_are_relative_to_1920_by_1080(self):
         self.assertEqual(

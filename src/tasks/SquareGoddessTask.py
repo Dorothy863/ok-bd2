@@ -14,6 +14,7 @@ from src.utils.calibration import FHD_1080, HD_720
 from src.utils.cartridge_quick_switch import (
     CHARACTER_CATEGORY_LABEL,
     EVENT_CATEGORY_LABEL,
+    FIXED_CARTRIDGE_SLOT_PRE_CLICK_DELAY_SECONDS,
     GAMEPLAY_CATEGORY_HIGHLIGHT_MIN_RATIO,
     LIFE_GAMEPLAY_CATEGORY_HIGHLIGHT_REGION,
     LIFE_GAMEPLAY_CATEGORY_LABEL,
@@ -231,9 +232,9 @@ class SquareGoddessTask(BaseBD2Task):
             self.log_info("广场女神像：点击后未确认生活玩法游戏卡带类别高亮。")
             return False
 
-        self.info_set("当前阶段", "选择梦幻广场卡带")
-        if not self._click_fantasia_square_card():
-            return False
+        self.info_set("当前阶段", "选择广场卡带2号位")
+        self.sleep(FIXED_CARTRIDGE_SLOT_PRE_CLICK_DELAY_SECONDS)
+        self.operate_click(*SQUARE_CARTRIDGE_SLOT_POINT, after_sleep=0.0)
 
         if self._wait_for_template(
             FANTASIA_SQUARE_TEMPLATE,
@@ -242,72 +243,6 @@ class SquareGoddessTask(BaseBD2Task):
         ):
             return True
 
-        return False
-
-    def _click_fantasia_square_card(self) -> bool:
-        """在生活玩法卡带列表里定位并点击 梦幻广场 卡带。
-
-        玩家可自定义卡带编排，固定 2 号位坐标会点错；因此要求 OCR **唯一命中**
-        “梦幻广场 / FANTASIA”文字再点卡带中心；无法唯一确认时重试，仍失败则安全停止
-        （绝不按固定坐标盲点）。
-        """
-        tries = int(self.config.get("广场卡带OCR最大尝试次数", 3))
-        for attempt in range(1, tries + 1):
-            try:
-                frame = self.capture_frame()
-                boxes = list(
-                    self.ocr(
-                        frame=frame,
-                        threshold=float(self.config.get("广场 OCR 阈值", 0.2)),
-                        log=False,
-                        name="梦幻广场卡带",
-                    )
-                )
-            except Exception as exc:
-                self.log_warning(f"广场女神像：OCR 梦幻广场卡带失败：{exc}")
-                return False
-
-            matches = []
-            for box in boxes:
-                name = str(getattr(box, "name", "") or "")
-                lowered = name.lower().replace(" ", "")
-                if "梦幻广场" not in name and "fantasia" not in lowered:
-                    continue
-                try:
-                    x, y, w, h = int(box.x), int(box.y), int(box.width), int(box.height)
-                except Exception:
-                    continue
-                if w > 0 and h > 0:
-                    matches.append((name, x, y, w, h))
-
-            if len(matches) == 1:
-                name, x, y, w, h = matches[0]
-                frame_h, frame_w = frame.shape[:2]
-                center_x, center_y = x + w // 2, y + h // 2
-                self.info_set("梦幻广场卡带 OCR", f"{name}@{center_x},{center_y}")
-                self.log_info(
-                    "广场女神像：OCR 唯一命中梦幻广场卡带，"
-                    f"name={name}, center=({center_x},{center_y})。"
-                )
-                self.operate_click(
-                    center_x / max(1, frame_w),
-                    center_y / max(1, frame_h),
-                    name="梦幻广场卡带",
-                    after_sleep=0.0,
-                )
-                return True
-            if len(matches) > 1:
-                self.log_warning(
-                    "广场女神像：OCR 命中多个疑似梦幻广场卡带，无法唯一确认，安全停止。"
-                )
-                return False
-            if attempt < tries:
-                self.log_info(
-                    f"广场女神像：第 {attempt} 次未 OCR 到梦幻广场卡带，稍后重试。"
-                )
-                self.sleep(0.5)
-
-        self.log_warning("广场女神像：多次 OCR 均未确认梦幻广场卡带，安全停止。")
         return False
 
     def _wait_for_cartridge_home(
