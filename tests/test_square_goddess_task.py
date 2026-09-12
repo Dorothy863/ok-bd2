@@ -160,7 +160,11 @@ class SquareGoddessEntryTest(unittest.TestCase):
         self.assertEqual(0.78, QUICK_SWITCH_TEMPLATE.min_zncc_score)
         self.assertIn(0.975, QUICK_SWITCH_TEMPLATE.scale_ratios)
         self.assertNotIn(0.80, QUICK_SWITCH_TEMPLATE.scale_ratios)
-        self.assertIsNotNone(QUICK_SWITCH_TEMPLATE.candidate_center_roi)
+        self.assertEqual(
+            ((0.15, 0.85, 0.65, 1.0), (0.16, 0.08, 0.24, 0.19)),
+            QUICK_SWITCH_TEMPLATE.relative_rois,
+        )
+        self.assertIsNone(QUICK_SWITCH_TEMPLATE.candidate_center_roi)
 
     def test_quick_switch_click_uses_one_second_stable_center(self):
         task = object.__new__(SquareGoddessTask)

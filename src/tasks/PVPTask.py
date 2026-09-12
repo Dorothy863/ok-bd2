@@ -20,6 +20,7 @@ from src.utils.cartridge_quick_switch import (
     BATTLE_GAMEPLAY_CATEGORY_POINT,
     FIXED_CARTRIDGE_SLOT_PRE_CLICK_DELAY_SECONDS,
     GAMEPLAY_CATEGORY_HIGHLIGHT_MIN_RATIO,
+    QUICK_SWITCH_SEARCH_REGIONS,
     RECENT_CATEGORY_LABEL,
     STORY_CATEGORY_LABEL,
     category_highlight_ratio,
@@ -1697,16 +1698,10 @@ QUICK_PACK_TEMPLATE = TemplateSpec(
     file_name="image/green/QuickSwitchPlayIco.png",
     threshold_key="快速切换按钮阈值",
     default_threshold=0.88,
-    relative_roi=(0.25, 0.85, 0.65, 1.0),
+    relative_rois=QUICK_SWITCH_SEARCH_REGIONS,
     green_mask=True,
     scale_ratios=(0.95, 0.975, 1.0, 1.025, 1.05),
     min_pixel_score=0.85,
-    candidate_center_roi=(
-        650 / FHD_1080.width,
-        950 / FHD_1080.height,
-        1050 / FHD_1080.width,
-        1045 / FHD_1080.height,
-    ),
     minimum_safe_threshold=0.88,
     # 与 SquareGoddessTask.QUICK_SWITCH_TEMPLATE 同一按钮：梦幻广场内暗色
     # 圆底样式在 1600x901 实机帧 zncc 最高 0.838（RPT-20260902-225925），

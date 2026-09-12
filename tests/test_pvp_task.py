@@ -213,6 +213,27 @@ class FiendRewardEntryTest(unittest.TestCase):
 
 
 class PVPTaskHelperTest(unittest.TestCase):
+    def test_quick_switch_searches_both_regions_and_rejects_middle(self):
+        template = np.random.default_rng(42).integers(30, 240, (24, 24), dtype=np.uint8)
+        spec = replace(QUICK_PACK_TEMPLATE, scale_ratios=(1.0,))
+        for width, height in ((1920, 1080), (1280, 720)):
+            scaled = cv2.resize(template, (round(30 * height / 1080),) * 2)
+            size = scaled.shape[0]
+            for target in ((0.19, 0.14), (0.19, 0.92), (0.44, 0.92), None):
+                with self.subTest(resolution=(width, height), target=target):
+                    frame = np.zeros((height, width), dtype=np.uint8)
+                    frame[height // 2:height // 2 + size, width // 2:width // 2 + size] = scaled
+                    if target is not None:
+                        x, y = round(width * target[0]), round(height * target[1])
+                        frame[y:y + size, x:x + size] = scaled
+                    result = task_vision.match_template(
+                        frame, spec, {}, TEMPLATE_DIR,
+                        loader=lambda *_: (template, None),
+                    )
+                    self.assertEqual(target is not None, task_vision.passes_match(result, spec, {}))
+                    if target is not None:
+                        self.assertEqual((x, y), result.position)
+
     def test_match_without_roi_uses_full_frame(self):
         task = object.__new__(PVPTask)
         task.config = {"加载页面阈值": 0.72}
@@ -278,7 +299,10 @@ class PVPTaskHelperTest(unittest.TestCase):
         self.assertEqual("image/green/QuickSwitchPlayIco.png", QUICK_PACK_TEMPLATE.file_name)
         self.assertEqual("快速切换按钮阈值", QUICK_PACK_TEMPLATE.threshold_key)
         self.assertTrue(QUICK_PACK_TEMPLATE.green_mask)
-        self.assertEqual((0.25, 0.85, 0.65, 1.0), QUICK_PACK_TEMPLATE.relative_roi)
+        self.assertEqual(
+            ((0.15, 0.85, 0.65, 1.0), (0.16, 0.08, 0.24, 0.19)),
+            QUICK_PACK_TEMPLATE.relative_rois,
+        )
         self.assertIn(0.975, QUICK_PACK_TEMPLATE.scale_ratios)
         self.assertNotIn(0.80, QUICK_PACK_TEMPLATE.scale_ratios)
         self.assertEqual(0.85, QUICK_PACK_TEMPLATE.min_pixel_score)
@@ -286,7 +310,7 @@ class PVPTaskHelperTest(unittest.TestCase):
         # BUG-20260902-06：广场内暗色圆底按钮 1600x901 实测 zncc 最高 0.838，
         # 误检位置最高 0.43；0.78 在两者之间有足够余量。
         self.assertEqual(0.78, QUICK_PACK_TEMPLATE.min_zncc_score)
-        self.assertIsNotNone(QUICK_PACK_TEMPLATE.candidate_center_roi)
+        self.assertIsNone(QUICK_PACK_TEMPLATE.candidate_center_roi)
 
         task = object.__new__(PVPTask)
         task._templates = {}
