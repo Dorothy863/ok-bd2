@@ -147,7 +147,7 @@ class PVPTask(BaseBD2Task):
         self.default_config.update(
             {
                 "启用": True,
-                "竞技场战斗倍数": 1,
+                "竞技场战斗倍数": 40,
                 "最多战斗轮次": 12,
                 "加载页面阈值": 0.72,
                 "主页压暗阈值": HOME_DIMMED_P95_THRESHOLD_DEFAULT,
