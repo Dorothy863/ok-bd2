@@ -88,7 +88,10 @@ class FreeGachaTask(TaskVisionMixin, BaseBD2Task):
             self.info_set("状态", "白嫖抽抽乐入口前主页确认失败。")
             self.log_info("白嫖抽抽乐：入口前未同时确认左列关键词、亮度和抽抽乐文字，不点击抽抽乐入口。")
             return False
-        self._click_reference(162, 986, after_sleep=0.5)
+        if not self._click_gacha_entry():
+            self.info_set("状态", "未识别到主页抽抽乐入口。")
+            self.log_info("白嫖抽抽乐：未识别到主页抽抽乐入口。")
+            return False
         loading_state, gacha_found, _ = self._wait_loading_or_gacha_page("进入抽卡页")
         if loading_state == "stuck":
             return False
@@ -479,6 +482,37 @@ class FreeGachaTask(TaskVisionMixin, BaseBD2Task):
             return ""
 
         return " ".join(box.name for box in boxes if getattr(box, "name", ""))
+
+    def _click_gacha_entry(self) -> bool:
+        """Click the homepage 抽抽乐 entry by its OCR box center."""
+        frame = self.capture_frame()
+        try:
+            boxes = self.ocr(
+                frame=frame,
+                threshold=float(self.config.get("抽卡 OCR 阈值", 0.2)),
+                target_height=720,
+                log=False,
+                name="免费抽抽乐入口",
+            )
+        except Exception as exc:
+            self.info_set("免费抽抽乐入口 OCR 错误", str(exc))
+            return False
+
+        expected = self._normalize_text("抽抽乐")
+        for box in boxes:
+            if self._normalize_text(getattr(box, "name", "")) != expected:
+                continue
+            x = float(box.x) + float(box.width) / 2
+            y = float(box.y) + float(box.height) / 2
+            self.info_set("免费抽抽乐入口 OCR", f"@{x:.0f},{y:.0f}")
+            self.operate_click(
+                x / max(1, frame.shape[1]),
+                y / max(1, frame.shape[0]),
+                name="免费抽抽乐入口",
+                after_sleep=0.5,
+            )
+            return True
+        return False
 
     def _click_reference(self, x: int, y: int, after_sleep: float = 0.0):
         self.operate_click(

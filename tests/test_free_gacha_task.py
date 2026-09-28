@@ -24,6 +24,7 @@ class FreeGachaTaskHelperTest(unittest.TestCase):
         task.log_info = lambda message, notify=False: notifications.append(
             (message, notify)
         )
+        task._click_gacha_entry = lambda: True
         task._click_reference = lambda *_args, **_kwargs: None
         task._wait_for_home_confirmation = lambda *_args, **_kwargs: True
         task._wait_loading_or_gacha_page = lambda *_args, **_kwargs: (
@@ -62,6 +63,39 @@ class FreeGachaTaskHelperTest(unittest.TestCase):
         self.assertFalse(FreeGachaTask.run(task))
         self.assertEqual(["白嫖抽抽乐入口前主页确认"], confirmations)
         self.assertIn(("状态", "白嫖抽抽乐入口前主页确认失败。"), statuses)
+
+    def test_gacha_entry_clicks_ocr_box_center(self):
+        class EntryBox:
+            name = "抽抽乐"
+            x = 171
+            y = 1342
+            width = 88
+            height = 37
+
+        task = object.__new__(FreeGachaTask)
+        task.config = {"抽卡 OCR 阈值": 0.2}
+        task.capture_frame = lambda: np.zeros((1440, 2560, 3), dtype=np.uint8)
+        task.ocr = lambda **_kwargs: [EntryBox()]
+        task.info_set = lambda *_args, **_kwargs: None
+        clicks = []
+        task.operate_click = lambda x, y, **kwargs: clicks.append((x, y, kwargs))
+
+        self.assertTrue(FreeGachaTask._click_gacha_entry(task))
+        self.assertEqual(1, len(clicks))
+        self.assertAlmostEqual(215 / 2560, clicks[0][0])
+        self.assertAlmostEqual(1360.5 / 1440, clicks[0][1])
+
+    def test_gacha_entry_missing_ocr_box_does_not_click(self):
+        task = object.__new__(FreeGachaTask)
+        task.config = {"抽卡 OCR 阈值": 0.2}
+        task.capture_frame = lambda: np.zeros((1440, 2560, 3), dtype=np.uint8)
+        task.ocr = lambda **_kwargs: []
+        task.info_set = lambda *_args, **_kwargs: None
+        task.operate_click = lambda *_args, **_kwargs: self.fail(
+            "OCR 未命中时不得点击"
+        )
+
+        self.assertFalse(FreeGachaTask._click_gacha_entry(task))
 
     def test_keyword_match_count_ignores_spaces_and_case(self):
         text = "So PERFECT！ 简直是无可挑剔的 masterpiece…！"

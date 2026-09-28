@@ -326,70 +326,32 @@ class DailyTask(TaskVisionMixin, QuickHuntConfigMixin, BaseBD2Task):
 
         entry_clicks = int(self.config.get("小屋进入最大点击次数", 3))
         found = False
-        loading_state = "none"
+        cabin_text = ""
         for attempt in range(1, entry_clicks + 1):
             if attempt > 1:
                 self.log_info(
                     f"小屋签到：第 {attempt} 次点击小屋入口（转场可能吞掉点击）。"
                 )
             self._click_reference(166, 158, after_sleep=0.5)
-            loading_state, found = self._wait_loading_or_template(
-                "小屋签到",
-                MY_HOME_TEMPLATE,
-                name=f"my_home_early{attempt}",
-            )
-            if found:
-                break
-            if loading_state == "none":
-                found, cabin_text = self._wait_for_ocr_keywords(
-                    MY_HOME_PAGE_KEYWORDS,
-                    timeout=0.1,
-                    minimum_matches=len(MY_HOME_PAGE_KEYWORDS),
-                    name=f"小屋页面确认{attempt}",
-                )
-                self.info_set("小屋页面 OCR", cabin_text or "-")
-                if found:
-                    self.log_info(
-                        "小屋签到：旧模板未命中，已通过当前页面 OCR 确认进入。"
-                    )
-                    break
-            if loading_state == "stuck":
-                break
-        self._status_set("小屋签到 loading 状态", loading_state)
-        if loading_state == "stuck":
-            self._status_set("小屋页面检测", "否")
-            return False
-        if loading_state == "loading":
-            self.sleep(1.0)
-        elif loading_state == "none":
-            self.log_info("小屋签到：未检测到 UI_loading_black.png，继续检测 my-home.png。")
-
-        if not found:
             found, cabin_text = self._wait_for_ocr_keywords(
                 MY_HOME_PAGE_KEYWORDS,
-                timeout=float(self.config.get("小屋页面 OCR 等待秒数", 3.0)),
+                timeout=float(self.config.get("小屋页面 OCR 等待秒数", 4.0)),
                 minimum_matches=len(MY_HOME_PAGE_KEYWORDS),
-                name="小屋页面确认",
+                name=f"小屋页面确认{attempt}",
             )
             self.info_set("小屋页面 OCR", cabin_text or "-")
             if found:
-                self.log_info("小屋签到：旧模板未命中，已通过当前页面 OCR 确认进入。")
-        if not found:
-            found = self._wait_for_template(
-                MY_HOME_TEMPLATE,
-                timeout=float(self.config.get("小屋页面等待秒数", 12.0)),
-                name="my_home",
-            )
+                break
+
         self._status_set("小屋页面检测", "是" if found else "否")
-        if found:
-            self.log_info("小屋签到：已进入小屋页面，返回主页。")
-            self._sleep_after_recognition()
-            self._click_reference(100, 50, after_sleep=1.0)
-        else:
-            self.log_info("小屋签到：未检测到 my-home.png，不执行返回点击。")
+        if not found:
+            self.log_info("小屋签到：未确认到当前小屋页面，不执行返回点击。")
             self._status_set("小屋签到返回主页结果", "未执行")
             return False
 
+        self.log_info("小屋签到：已进入小屋页面，返回主页。")
+        self._sleep_after_recognition()
+        self._click_reference(100, 50, after_sleep=1.0)
         home_ok = self._wait_for_home_confirmation("小屋签到返回主页")
         self._status_set("小屋签到返回主页结果", "通过" if home_ok else "失败")
         return home_ok

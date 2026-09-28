@@ -759,36 +759,36 @@ class DailyTaskHelperTest(unittest.TestCase):
             self.assertEqual(template.shape, mask.shape)
             self.assertGreater(mask.size, int(np.count_nonzero(mask)))
 
-    def test_my_home_sign_in_continues_when_loading_is_missing(self):
-        task = object.__new__(DailyTask)
-        task.config = {"小屋页面等待秒数": 12.0, "小屋进入最大点击次数": 3}
-        task.info_set = lambda *_args, **_kwargs: None
-        task.log_info = lambda *_args, **_kwargs: None
-        task.sleep = lambda *_args, **_kwargs: None
-        clicks = []
-        task._click_reference = lambda x, y, **_kwargs: clicks.append((x, y))
-        task._wait_loading_or_template = lambda *_args, **_kwargs: ("none", False)
-        task._wait_for_ocr_keywords = lambda *_args, **_kwargs: (False, "")
-        task._wait_for_template = lambda *_args, **_kwargs: True
-        task._wait_for_home_confirmation = lambda *_args, **_kwargs: True
-
-        self.assertTrue(DailyTask.run_my_home_sign_in(task))
-        # 转场可能吞点击：小屋入口会补点 3 次（默认上限），确认进入后再返回主页。
-        self.assertEqual([(166, 158)] * 3 + [(100, 50)], clicks)
-
-    def test_my_home_sign_in_accepts_current_ui_ocr_when_template_misses(self):
+    def test_my_home_sign_in_retries_entry_until_ocr_confirms(self):
         task = object.__new__(DailyTask)
         task.config = {
             "小屋页面等待秒数": 12.0,
             "小屋进入最大点击次数": 3,
-            "小屋页面 OCR 等待秒数": 3.0,
+            "小屋页面 OCR 等待秒数": 4.0,
         }
         task.info_set = lambda *_args, **_kwargs: None
         task.log_info = lambda *_args, **_kwargs: None
         task.sleep = lambda *_args, **_kwargs: None
         clicks = []
         task._click_reference = lambda x, y, **_kwargs: clicks.append((x, y))
-        task._wait_loading_or_template = lambda *_args, **_kwargs: ("none", False)
+        checks = iter(((False, ""), (False, ""), (True, "我的小屋 调整布局")))
+        task._wait_for_ocr_keywords = lambda *_args, **_kwargs: next(checks)
+        task._wait_for_home_confirmation = lambda *_args, **_kwargs: True
+
+        self.assertTrue(DailyTask.run_my_home_sign_in(task))
+        self.assertEqual([(166, 158)] * 3 + [(100, 50)], clicks)
+
+    def test_my_home_sign_in_confirms_current_ui_by_ocr(self):
+        task = object.__new__(DailyTask)
+        task.config = {
+            "小屋进入最大点击次数": 3,
+            "小屋页面 OCR 等待秒数": 4.0,
+        }
+        task.info_set = lambda *_args, **_kwargs: None
+        task.log_info = lambda *_args, **_kwargs: None
+        task.sleep = lambda *_args, **_kwargs: None
+        clicks = []
+        task._click_reference = lambda x, y, **_kwargs: clicks.append((x, y))
         task._wait_for_ocr_keywords = lambda *_args, **_kwargs: (
             True,
             "我的小屋 调整布局 编辑房间",
