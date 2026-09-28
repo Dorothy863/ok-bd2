@@ -64,6 +64,7 @@ GUILD_SUCCESS_KEYWORDS = ["签到成功", "奖励已发放至邮箱"]
 # 公会页面固定文案（左侧公告/按钮与右上商店，RPT-20260901-233554 实测整页
 # OCR 均可读到），用于返回主页失败时判断是否仍滞留公会页。
 GUILD_PAGE_KEYWORDS = ["公告事项", "进入公会联合战", "公会商店"]
+MY_HOME_PAGE_KEYWORDS = ["我的小屋", "调整布局"]
 
 # 经营管理弹窗实际文案（国服简体，BUG-20260829-011 实测转录）：
 # 餐馆营业额现状/渔笼收获情况/助手工作情况/取消/一键获得。
@@ -339,6 +340,19 @@ class DailyTask(TaskVisionMixin, QuickHuntConfigMixin, BaseBD2Task):
             )
             if found:
                 break
+            if loading_state == "none":
+                found, cabin_text = self._wait_for_ocr_keywords(
+                    MY_HOME_PAGE_KEYWORDS,
+                    timeout=0.1,
+                    minimum_matches=len(MY_HOME_PAGE_KEYWORDS),
+                    name=f"小屋页面确认{attempt}",
+                )
+                self.info_set("小屋页面 OCR", cabin_text or "-")
+                if found:
+                    self.log_info(
+                        "小屋签到：旧模板未命中，已通过当前页面 OCR 确认进入。"
+                    )
+                    break
             if loading_state == "stuck":
                 break
         self._status_set("小屋签到 loading 状态", loading_state)
@@ -350,6 +364,16 @@ class DailyTask(TaskVisionMixin, QuickHuntConfigMixin, BaseBD2Task):
         elif loading_state == "none":
             self.log_info("小屋签到：未检测到 UI_loading_black.png，继续检测 my-home.png。")
 
+        if not found:
+            found, cabin_text = self._wait_for_ocr_keywords(
+                MY_HOME_PAGE_KEYWORDS,
+                timeout=float(self.config.get("小屋页面 OCR 等待秒数", 3.0)),
+                minimum_matches=len(MY_HOME_PAGE_KEYWORDS),
+                name="小屋页面确认",
+            )
+            self.info_set("小屋页面 OCR", cabin_text or "-")
+            if found:
+                self.log_info("小屋签到：旧模板未命中，已通过当前页面 OCR 确认进入。")
         if not found:
             found = self._wait_for_template(
                 MY_HOME_TEMPLATE,
