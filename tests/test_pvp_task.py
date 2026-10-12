@@ -902,8 +902,10 @@ class PVPTaskHelperTest(unittest.TestCase):
             (x, y, after_sleep)
         )
 
+        # P4：``_handle_recent_cartridge_special_pages`` 搬到
+        # cartridge_home_mixin，时间夹具跟随方法定义模块。
         with patch(
-            "src.tasks.BaseBD2Task.monotonic",
+            "src.tasks.cartridge_home_mixin.monotonic",
             side_effect=(0.0, 0.5, 1.0, 3.1),
         ):
             self.assertTrue(task._handle_recent_cartridge_special_pages(timeout=3.0))
