@@ -4,10 +4,12 @@ from __future__ import annotations
 
 from pathlib import Path
 from time import monotonic
+from typing import Protocol, runtime_checkable
 
 import cv2
 import numpy as np
 
+from src.tasks.ports import TaskSurface
 from src.utils import task_vision
 from src.utils.calibration import FHD_1080
 from src.utils.home_confirmation import (
@@ -42,7 +44,42 @@ LOADING_TEMPLATE = TemplateSpec(
 )
 
 
+@runtime_checkable
+class HomeReturnHost(TaskSurface, Protocol):
+    """``TaskVisionMixin`` 宿主在端口之外还提供的主页业务方法。
+
+    协议只描述被调用面，不代表接口稳定承诺。这两个方法不是驱动端口，而是 ``BaseBD2Task`` 的业务面
+    （``src/tasks/BaseBD2Task.py:312`` / ``:651``）；``_wait_for_home_confirmation`` 与
+    ``_auto_return_home_after_timeout`` 会调用它们，所以那两个方法的 ``self`` 标注为
+    本协议而不是 ``TaskSurface``，避免类型标注说谎。P4 拆出页面业务后应改为
+    「页面识别 + InputPort」。
+    """
+
+    def attempt_return_home(self, name: str = "自动返回主页") -> bool:
+        """点击右上角主页按钮把角色带回主界面。"""
+        ...
+
+    def clear_temporary_home_announcement_if_needed(
+        self,
+        *,
+        left_hits: int,
+        required_left_hits: int,
+        brightness: float,
+        brightness_threshold: float,
+        gacha_ocr_text: object,
+        context: str,
+    ) -> bool:
+        """亮度不足时按登录公告流程清理临时公告。"""
+        ...
+
+
 class TaskVisionMixin:
+    """公共视觉基座：``self`` 是混入宿主（``BaseBD2Task``）。
+
+    方法签名里的 ``self: TaskSurface`` / ``self: HomeReturnHost`` 声明宿主被当作
+    鸭子类型使用的调用面（P3）；``TaskSurface`` 只描述被调用面，不是接口稳定承诺。
+    """
+
     def _init_vision_state(self) -> None:
         self._templates: dict[str, np.ndarray] = {}
         self._template_masks: dict[str, np.ndarray | None] = {}
@@ -50,7 +87,7 @@ class TaskVisionMixin:
         self._match_error_names: set[str] = set()
         self._match_pause_until = 0.0
 
-    def _quick_vision(self) -> Vision:
+    def _quick_vision(self: TaskSurface) -> Vision:
         vision = getattr(self, "_quick_hunt_vision", None)
         if vision is None:
             vision = Vision(self)
@@ -61,7 +98,7 @@ class TaskVisionMixin:
 
     _to_gray = staticmethod(to_gray)
 
-    def _status_set(self, key: str, value) -> None:
+    def _status_set(self: TaskSurface, key: str, value) -> None:
         try:
             self.info_set(key, value)
         except AttributeError:
@@ -99,7 +136,7 @@ class TaskVisionMixin:
         )
         return confirmed, left_hits, p95_brightness, gacha_text
 
-    def _click_reference(self, x: int, y: int, after_sleep: float = 0.0):
+    def _click_reference(self: TaskSurface, x: int, y: int, after_sleep: float = 0.0):
         self.operate_click(
             max(0.0, min(1.0, x / REFERENCE_WIDTH)),
             max(0.0, min(1.0, y / REFERENCE_HEIGHT)),
@@ -107,7 +144,7 @@ class TaskVisionMixin:
         )
 
     def _wait_loading_or_template(
-        self,
+        self: TaskSurface,
         task_name: str,
         spec: TemplateSpec,
         name: str,
@@ -135,7 +172,7 @@ class TaskVisionMixin:
         return "none", False
 
     def _wait_loading_gone_or_template(
-        self,
+        self: TaskSurface,
         task_name: str,
         spec: TemplateSpec,
         name: str,
@@ -166,7 +203,7 @@ class TaskVisionMixin:
         return confirmed
 
     def _wait_loading_or_template_or_ocr(
-        self,
+        self: TaskSurface,
         task_name: str,
         spec: TemplateSpec,
         keywords: list[str],
@@ -214,7 +251,7 @@ class TaskVisionMixin:
         return "none", False, last_text
 
     def _wait_loading_gone_or_template_or_ocr(
-        self,
+        self: TaskSurface,
         task_name: str,
         spec: TemplateSpec,
         keywords: list[str],
@@ -242,7 +279,7 @@ class TaskVisionMixin:
         return "stuck", False, last_text
 
     def _wait_for_template(
-        self,
+        self: TaskSurface,
         spec: TemplateSpec,
         timeout: float,
         name: str,
@@ -263,7 +300,7 @@ class TaskVisionMixin:
         return False
 
     def _wait_for_template_or_ocr(
-        self,
+        self: TaskSurface,
         spec: TemplateSpec,
         keywords: list[str],
         timeout: float,
@@ -295,7 +332,7 @@ class TaskVisionMixin:
         return False, last_text
 
     def _wait_for_ocr_keywords(
-        self,
+        self: TaskSurface,
         keywords: list[str],
         timeout: float,
         minimum_matches: int,
@@ -316,7 +353,7 @@ class TaskVisionMixin:
         return False, last_text
 
     def _wait_for_home_confirmation(
-        self,
+        self: HomeReturnHost,
         name: str,
         interval: float = 0.35,
         timeout: float | None = None,
@@ -374,7 +411,7 @@ class TaskVisionMixin:
         return False
 
     def _auto_return_home_after_timeout(
-        self,
+        self: HomeReturnHost,
         name: str,
         interval: float = 0.35,
     ) -> bool:
@@ -412,7 +449,7 @@ class TaskVisionMixin:
                 best_spec = spec
         return best, best_spec
 
-    def _match(self, frame, spec: TemplateSpec) -> MatchResult:
+    def _match(self: TaskSurface, frame, spec: TemplateSpec) -> MatchResult:
         empty = MatchResult(-1.0, (0, 0), (0, 0))
         if monotonic() < self._match_pause_until:
             return empty
@@ -450,10 +487,10 @@ class TaskVisionMixin:
     def _load_template_mask(self, spec: TemplateSpec) -> np.ndarray | None:
         return task_vision.load_template(TEMPLATE_DIR, spec, cache=self._templates)[1]
 
-    def _passes(self, result: MatchResult, spec: TemplateSpec) -> bool:
+    def _passes(self: TaskSurface, result: MatchResult, spec: TemplateSpec) -> bool:
         return task_vision.passes_match(result, spec, self.config)
 
-    def _ocr_text(self, frame, name: str) -> str:
+    def _ocr_text(self: TaskSurface, frame, name: str) -> str:
         try:
             boxes = self.ocr(
                 frame=frame,
@@ -472,5 +509,5 @@ class TaskVisionMixin:
     def _keyword_match_count(text: str, keywords: list[str]) -> int:
         return keyword_match_count(text, keywords)
 
-    def _home_p95_threshold(self) -> float:
+    def _home_p95_threshold(self: TaskSurface) -> float:
         return float(self.config.get("主页压暗阈值", HOME_DIMMED_P95_THRESHOLD_DEFAULT))
