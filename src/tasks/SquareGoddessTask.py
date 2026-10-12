@@ -38,6 +38,7 @@ from src.utils.image_utils import (
     stabilize_template_match,
 )
 from src.utils.ocr_utils import normalize_ocr_text
+from src.utils.polling import PollDeadline
 
 REFERENCE_WIDTH = FHD_1080.width
 REFERENCE_HEIGHT = FHD_1080.height
@@ -236,10 +237,9 @@ class SquareGoddessTask(BaseBD2Task):
             self.log_info("广场女神像：点击后未确认生活玩法游戏卡带类别高亮。")
             return False
 
-        self.info_set("当前阶段", "选择梦幻广场卡带")
+        self.info_set("当前阶段", "选择广场卡带2号位")
         self.sleep(FIXED_CARTRIDGE_SLOT_PRE_CLICK_DELAY_SECONDS)
-        if not self._click_fantasia_square_card():
-            return False
+        self.operate_click(*SQUARE_CARTRIDGE_SLOT_POINT, after_sleep=0.0)
 
         if self._wait_for_template(
             FANTASIA_SQUARE_TEMPLATE,
@@ -269,59 +269,6 @@ class SquareGoddessTask(BaseBD2Task):
                 self.attempt_return_home()
         return False
 
-    def _click_fantasia_square_card(self) -> bool:
-        """在生活玩法卡带列表里定位并点击 梦幻广场 卡带。
-
-        卡带编排可被玩家自定义，固定 2 号位坐标会点错（BUG-20260905）；
-        先按“梦幻广场 / FANTASIA”文字 OCR 命中点卡带中心，找不到再退回固定坐标。
-        """
-        clicked = False
-        try:
-            frame = self.capture_frame()
-            boxes = list(
-                self.ocr(
-                    frame=frame,
-                    threshold=float(self.config.get("广场 OCR 阈值", 0.2)),
-                    log=False,
-                    name="梦幻广场卡带",
-                )
-            )
-        except Exception as exc:
-            self.log_warning(f"广场女神像：OCR 梦幻广场卡带失败：{exc}")
-            boxes = []
-
-        for box in boxes:
-            name = str(getattr(box, "name", "") or "")
-            lowered = name.lower().replace(" ", "")
-            if "梦幻广场" not in name and "fantasia" not in lowered:
-                continue
-            try:
-                x, y, w, h = int(box.x), int(box.y), int(box.width), int(box.height)
-            except Exception:
-                continue
-            if w <= 0 or h <= 0:
-                continue
-            frame_h, frame_w = frame.shape[:2]
-            center_x, center_y = x + w // 2, y + h // 2
-            self.info_set("梦幻广场卡带 OCR", f"{name}@{center_x},{center_y}")
-            self.log_info(
-                "广场女神像：OCR 命中梦幻广场卡带，"
-                f"name={name}, center=({center_x},{center_y})。"
-            )
-            self.operate_click(
-                center_x / max(1, frame_w),
-                center_y / max(1, frame_h),
-                name="梦幻广场卡带",
-                after_sleep=0.0,
-            )
-            clicked = True
-            break
-
-        if not clicked:
-            self.log_info("广场女神像：未 OCR 到梦幻广场卡带，使用固定 2 号位坐标兜底。")
-            self.operate_click(*SQUARE_CARTRIDGE_SLOT_POINT, after_sleep=0.0)
-        return True
-
     def _wait_for_cartridge_home(
         self,
         interval: float = 0.35,
@@ -336,7 +283,7 @@ class SquareGoddessTask(BaseBD2Task):
             if timeout is None
             else max(0.0, float(timeout))
         )
-        end_at = monotonic() + wait_seconds
+        end_at = PollDeadline(wait_seconds, monotonic)
         last_left_hits = 0
         last_p95 = 0.0
         last_gacha_text = ""
@@ -352,7 +299,7 @@ class SquareGoddessTask(BaseBD2Task):
             if remaining_home_clicks > 0
             else float("inf")
         )
-        while monotonic() <= end_at:
+        while not end_at.poll_expired():
             frame = self.capture_frame()
             left_text = self._ocr_text(
                 frame,
@@ -437,11 +384,9 @@ class SquareGoddessTask(BaseBD2Task):
     def _wait_for_quick_switch_page(self, interval: float = 0.5) -> bool:
         self.info_set("当前阶段", "确认卡带选择页")
         self.sleep(1.0)
-        end_at = monotonic() + float(
-            self.config.get("卡带选择页确认等待秒数", 10.0)
-        )
+        end_at = PollDeadline(float(self.config.get("卡带选择页确认等待秒数", 10.0)), monotonic)
         last_text = ""
-        while monotonic() <= end_at:
+        while not end_at.poll_expired():
             frame = self.capture_frame()
             text = self._ocr_text(frame, name="卡带选择页")
             last_text = text or last_text
@@ -464,10 +409,10 @@ class SquareGoddessTask(BaseBD2Task):
         return False
 
     def _wait_for_life_gameplay_category(self, interval: float = 0.5) -> bool:
-        end_at = monotonic() + float(self.config.get("玩法类别高亮确认秒数", 3.0))
+        end_at = PollDeadline(float(self.config.get("玩法类别高亮确认秒数", 3.0)), monotonic)
         last_text = ""
         last_highlight_ratio = 0.0
-        while monotonic() <= end_at:
+        while not end_at.poll_expired():
             frame = self.capture_frame()
             text = self._ocr_text(
                 frame,
@@ -531,9 +476,9 @@ class SquareGoddessTask(BaseBD2Task):
         timeout: float = 3.0,
         interval: float = 0.35,
     ) -> bool:
-        end_at = monotonic() + max(0.0, timeout)
+        end_at = PollDeadline(max(0.0, timeout), monotonic)
         last_score = -1.0
-        while monotonic() <= end_at:
+        while not end_at.poll_expired():
             frame = self.capture_frame()
             frame_height, frame_width = frame.shape[:2]
             result = self._match(frame, SQUARE_NOTICE_TEMPLATE)
@@ -558,11 +503,11 @@ class SquareGoddessTask(BaseBD2Task):
         timeout: float,
         interval: float = 0.35,
     ) -> bool:
-        end_at = monotonic() + max(0.0, timeout)
+        end_at = PollDeadline(max(0.0, timeout), monotonic)
         last_score = -1.0
         last_pixel_score = -1.0
         last_text = ""
-        while monotonic() <= end_at:
+        while not end_at.poll_expired():
             frame = self.capture_frame()
             frame_height, frame_width = frame.shape[:2]
             result = self._match(frame, SQUARE_DAILY_ICON_TEMPLATE)
@@ -595,7 +540,7 @@ class SquareGoddessTask(BaseBD2Task):
         timeout: float,
         interval: float = 0.5,
     ) -> bool:
-        end_at = monotonic() + max(0.0, timeout)
+        end_at = PollDeadline(max(0.0, timeout), monotonic)
         fallback_interval = max(
             0.5,
             float(self.config.get("女神像许愿等待秒数", 8.0)),
@@ -604,7 +549,7 @@ class SquareGoddessTask(BaseBD2Task):
         max_clicks = max(1, int(self.config.get("女神像许愿最多点击次数", 3)))
         click_count = 0
 
-        while monotonic() <= end_at:
+        while not end_at.poll_expired():
             frame = self.capture_frame()
             frame_height, frame_width = frame.shape[:2]
             point, text = self._ocr_pattern_click_point(
@@ -645,9 +590,9 @@ class SquareGoddessTask(BaseBD2Task):
         timeout: float,
         interval: float = 0.5,
     ) -> bool:
-        end_at = monotonic() + max(0.0, timeout)
+        end_at = PollDeadline(max(0.0, timeout), monotonic)
         last_text = ""
-        while monotonic() <= end_at:
+        while not end_at.poll_expired():
             frame = self.capture_frame()
             point, text = self._goddess_navigation_click_point(
                 frame,
@@ -678,9 +623,9 @@ class SquareGoddessTask(BaseBD2Task):
         interval: float = 0.35,
         stabilize: bool = False,
     ) -> bool:
-        end_at = monotonic() + max(0.0, timeout)
+        end_at = PollDeadline(max(0.0, timeout), monotonic)
         last_score = -1.0
-        while monotonic() <= end_at:
+        while not end_at.poll_expired():
             frame = self.capture_frame()
             frame_height, frame_width = frame.shape[:2]
             result = self._match(frame, spec)
@@ -754,9 +699,9 @@ class SquareGoddessTask(BaseBD2Task):
         after_sleep: float = 0.0,
         interval: float = 0.5,
     ) -> bool:
-        end_at = monotonic() + max(0.0, timeout)
+        end_at = PollDeadline(max(0.0, timeout), monotonic)
         last_text = ""
-        while monotonic() <= end_at:
+        while not end_at.poll_expired():
             frame = self.capture_frame()
             frame_height, frame_width = frame.shape[:2]
             point, text = self._ocr_pattern_click_point(frame, patterns, name=name, roi=roi)
@@ -790,9 +735,9 @@ class SquareGoddessTask(BaseBD2Task):
         roi: tuple[int, int, int, int] | None = None,
         interval: float = 0.5,
     ) -> tuple[tuple[int, int] | None, tuple[int, int] | None, str]:
-        end_at = monotonic() + max(0.0, timeout)
+        end_at = PollDeadline(max(0.0, timeout), monotonic)
         last_text = ""
-        while monotonic() <= end_at:
+        while not end_at.poll_expired():
             frame = self.capture_frame()
             frame_height, frame_width = frame.shape[:2]
             point, text = self._ocr_pattern_click_point(frame, patterns, name=name, roi=roi)
@@ -911,9 +856,9 @@ class SquareGoddessTask(BaseBD2Task):
         name: str,
         interval: float = 0.35,
     ) -> tuple[MatchResult | None, tuple[int, int] | None]:
-        end_at = monotonic() + max(0.0, timeout)
+        end_at = PollDeadline(max(0.0, timeout), monotonic)
         last_score = -1.0
-        while monotonic() <= end_at:
+        while not end_at.poll_expired():
             frame = self.capture_frame()
             result = self._match(frame, spec)
             last_score = result.score
@@ -932,9 +877,9 @@ class SquareGoddessTask(BaseBD2Task):
         name: str,
         interval: float = 0.5,
     ) -> tuple[tuple[int, int] | None, tuple[int, int] | None]:
-        end_at = monotonic() + max(0.0, timeout)
+        end_at = PollDeadline(max(0.0, timeout), monotonic)
         last_text = ""
-        while monotonic() <= end_at:
+        while not end_at.poll_expired():
             frame = self.capture_frame()
             frame_height, frame_width = frame.shape[:2]
             boxes = self._ocr_boxes(frame, name=name)
@@ -956,9 +901,9 @@ class SquareGoddessTask(BaseBD2Task):
         name: str,
         interval: float = 0.35,
     ) -> bool:
-        end_at = monotonic() + max(0.0, timeout)
+        end_at = PollDeadline(max(0.0, timeout), monotonic)
         last_score = -1.0
-        while monotonic() <= end_at:
+        while not end_at.poll_expired():
             frame = self.capture_frame()
             result = self._match(frame, spec)
             last_score = result.score
@@ -978,9 +923,9 @@ class SquareGoddessTask(BaseBD2Task):
         roi: tuple[int, int, int, int] | None = None,
         interval: float = 0.5,
     ) -> tuple[bool, str]:
-        end_at = monotonic() + max(0.0, timeout)
+        end_at = PollDeadline(max(0.0, timeout), monotonic)
         last_text = ""
-        while monotonic() <= end_at:
+        while not end_at.poll_expired():
             frame = self.capture_frame()
             entries = self._ocr_entries(frame, name=name, roi=roi)
             text = " ".join(label for label, _confidence in entries)
@@ -1000,9 +945,9 @@ class SquareGoddessTask(BaseBD2Task):
         roi: tuple[int, int, int, int] | None = None,
         interval: float = 0.5,
     ) -> tuple[bool, str]:
-        end_at = monotonic() + max(0.0, timeout)
+        end_at = PollDeadline(max(0.0, timeout), monotonic)
         last_text = ""
-        while monotonic() <= end_at:
+        while not end_at.poll_expired():
             frame = self.capture_frame()
             text = self._ocr_text(frame, name=name, roi=roi)
             last_text = text or last_text

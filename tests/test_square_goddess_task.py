@@ -1,4 +1,5 @@
 import unittest
+from dataclasses import replace
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -77,7 +78,7 @@ class SquareGoddessEntryTest(unittest.TestCase):
         task.log_info = lambda *_args, **_kwargs: None
         stages = []
 
-        task._wait_for_cartridge_home = lambda: stages.append("home") or True
+        task._wait_for_cartridge_home = lambda **_kwargs: stages.append("home") or True
         task._click_template_until = (
             lambda spec, **_kwargs: stages.append(("quick", spec)) or True
         )
@@ -103,7 +104,15 @@ class SquareGoddessEntryTest(unittest.TestCase):
         )
 
         self.assertTrue(SquareGoddessTask._enter_square_from_home(task))
-        self.assertEqual(["home", ("quick", QUICK_SWITCH_TEMPLATE), "page"], stages[:3])
+        # 返回战场后快速切换图标位置随场景变化：生产代码改为全帧匹配，不再限定底部 ROI。
+        self.assertEqual(
+            [
+                "home",
+                ("quick", replace(QUICK_SWITCH_TEMPLATE, roi=None, candidate_center_roi=None)),
+                "page",
+            ],
+            stages[:3],
+        )
         self.assertEqual(
             [0.5, FIXED_CARTRIDGE_SLOT_PRE_CLICK_DELAY_SECONDS],
             sleeps,
