@@ -17,6 +17,7 @@ from qfluentwidgets import FluentIcon
 
 from src.tasks.BaseBD2Task import BaseBD2Task
 from src.tasks.task_vision_mixin import TaskVisionMixin
+from src.utils.polling import PollDeadline
 
 
 class BD2SceneEscProbeTask(TaskVisionMixin, BaseBD2Task):
@@ -196,8 +197,8 @@ class BD2SceneEscProbeTask(TaskVisionMixin, BaseBD2Task):
 
     def _wait_for_home(self, timeout: float) -> bool:
         """轮询主页三信号，等待加载完成并确认回到主页。"""
-        end_at = monotonic() + max(0.0, timeout)
-        while monotonic() <= end_at:
+        end_at = PollDeadline(max(0.0, timeout), monotonic)
+        while not end_at.poll_expired():
             try:
                 frame = self.capture_frame()
                 confirmed, _left, _p95, _gacha = self._home_confirmation_signals(

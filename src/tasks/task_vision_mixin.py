@@ -24,6 +24,7 @@ from src.utils.home_confirmation import (
 )
 from src.utils.image_utils import to_gray
 from src.utils.ocr_utils import keyword_match_count, normalize_ocr_text
+from src.utils.polling import PollDeadline
 
 REFERENCE_WIDTH = FHD_1080.width
 
@@ -112,8 +113,8 @@ class TaskVisionMixin:
         name: str,
         interval: float = 0.35,
     ) -> tuple[str, bool]:
-        end_at = monotonic() + float(self.config.get("loading 出现等待秒数", 6.0))
-        while monotonic() <= end_at:
+        end_at = PollDeadline(float(self.config.get("loading 出现等待秒数", 6.0)), monotonic)
+        while not end_at.poll_expired():
             frame = self.capture_frame()
             result = self._match(frame, spec)
             self.info_set(name, f"{result.score:.3f}")
@@ -140,8 +141,8 @@ class TaskVisionMixin:
         name: str,
         interval: float = 0.35,
     ) -> tuple[str, bool]:
-        end_at = monotonic() + float(self.config.get("loading 消失等待秒数", 35.0))
-        while monotonic() <= end_at:
+        end_at = PollDeadline(float(self.config.get("loading 消失等待秒数", 35.0)), monotonic)
+        while not end_at.poll_expired():
             frame = self.capture_frame()
             result = self._match(frame, spec)
             self.info_set(name, f"{result.score:.3f}")
@@ -173,9 +174,9 @@ class TaskVisionMixin:
         interval: float = 0.5,
         reject_template_on_home: bool = False,
     ) -> tuple[str, bool, str]:
-        end_at = monotonic() + float(self.config.get("loading 出现等待秒数", 6.0))
+        end_at = PollDeadline(float(self.config.get("loading 出现等待秒数", 6.0)), monotonic)
         last_text = ""
-        while monotonic() <= end_at:
+        while not end_at.poll_expired():
             frame = self.capture_frame()
             result = self._match(frame, spec)
             text = self._ocr_text(frame, name=name)
@@ -221,8 +222,8 @@ class TaskVisionMixin:
         last_text: str = "",
         interval: float = 0.5,
     ) -> tuple[str, bool, str]:
-        end_at = monotonic() + float(self.config.get("loading 消失等待秒数", 35.0))
-        while monotonic() <= end_at:
+        end_at = PollDeadline(float(self.config.get("loading 消失等待秒数", 35.0)), monotonic)
+        while not end_at.poll_expired():
             frame = self.capture_frame()
             result = self._match(frame, spec)
             text = self._ocr_text(frame, name=name)
@@ -247,9 +248,9 @@ class TaskVisionMixin:
         name: str,
         interval: float = 0.35,
     ) -> bool:
-        end_at = monotonic() + max(0.0, timeout)
+        end_at = PollDeadline(max(0.0, timeout), monotonic)
         last_score = -1.0
-        while monotonic() <= end_at:
+        while not end_at.poll_expired():
             frame = self.capture_frame()
             result = self._match(frame, spec)
             last_score = result.score
@@ -270,9 +271,9 @@ class TaskVisionMixin:
         interval: float = 0.5,
         reject_template_on_home: bool = False,
     ) -> tuple[bool, str]:
-        end_at = monotonic() + max(0.0, timeout)
+        end_at = PollDeadline(max(0.0, timeout), monotonic)
         last_text = ""
-        while monotonic() <= end_at:
+        while not end_at.poll_expired():
             frame = self.capture_frame()
             result = self._match(frame, spec)
             text = self._ocr_text(frame, name=name)
@@ -301,9 +302,9 @@ class TaskVisionMixin:
         name: str,
         interval: float = 0.5,
     ) -> tuple[bool, str]:
-        end_at = monotonic() + max(0.0, timeout)
+        end_at = PollDeadline(max(0.0, timeout), monotonic)
         last_text = ""
-        while monotonic() <= end_at:
+        while not end_at.poll_expired():
             frame = self.capture_frame()
             text = self._ocr_text(frame, name=name)
             last_text = text
@@ -323,11 +324,11 @@ class TaskVisionMixin:
     ) -> bool:
         if timeout is None:
             timeout = float(self.config.get("主页确认等待秒数", 10.0))
-        end_at = monotonic() + timeout
+        end_at = PollDeadline(timeout, monotonic)
         last_left_hits = 0
         last_p95 = 0.0
         last_gacha_text = ""
-        while monotonic() <= end_at:
+        while not end_at.poll_expired():
             frame = self.capture_frame()
             (
                 confirmed,

@@ -31,6 +31,7 @@ from src.utils.image_utils import (
     template_match_response,
     to_gray,
 )
+from src.utils.polling import PollDeadline
 from src.utils.template_resolution import (
     offline_template_scale,
     offline_template_search_region,
@@ -1078,8 +1079,8 @@ class Vision:
     def wait_template(
         self, spec: TemplateSpec, timeout: float, interval: float = 0.4
     ) -> MatchResult | None:
-        end_at = monotonic() + max(0.0, timeout)
-        while monotonic() <= end_at:
+        end_at = PollDeadline(max(0.0, timeout), monotonic)
+        while not end_at.poll_expired():
             frame = self.capture()
             result = self.match(frame, spec)
             self._status(spec.name, f"{result.score:.3f}/{result.pixel_score:.3f}")
@@ -1116,8 +1117,8 @@ class Vision:
     ) -> bool:
         """Click a template only after its center stabilizes across about one second."""
 
-        end_at = monotonic() + max(0.0, timeout)
-        while monotonic() <= end_at:
+        end_at = PollDeadline(max(0.0, timeout), monotonic)
+        while not end_at.poll_expired():
             frame = self.capture()
             result = self.match(frame, spec)
             if not self.passes(result, spec):
@@ -1288,8 +1289,8 @@ class Vision:
         interval: float = 0.5,
     ) -> str | None:
         compiled = [re.compile(pattern, re.IGNORECASE) for pattern in patterns]
-        end_at = monotonic() + max(0.0, timeout)
-        while monotonic() <= end_at:
+        end_at = PollDeadline(max(0.0, timeout), monotonic)
+        while not end_at.poll_expired():
             text = self.ocr_text(self.capture(), name, roi)
             normalized = self.simplify(text)
             if any(pattern.search(normalized) for pattern in compiled):

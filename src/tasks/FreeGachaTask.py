@@ -14,6 +14,7 @@ from src.utils.image_utils import (
     to_gray,
 )
 from src.utils.ocr_utils import fuzzy_substring_match, keyword_match_count, normalize_ocr_text
+from src.utils.polling import PollDeadline
 
 REFERENCE_WIDTH = FHD_1080.width
 REFERENCE_HEIGHT = FHD_1080.height
@@ -178,9 +179,9 @@ class FreeGachaTask(TaskVisionMixin, BaseBD2Task):
         ocr_name: str,
         interval: float = 0.5,
     ) -> tuple[str, bool, str]:
-        end_at = monotonic() + float(self.config.get("loading 出现等待秒数", 6.0))
+        end_at = PollDeadline(float(self.config.get("loading 出现等待秒数", 6.0)), monotonic)
         last_text = ""
-        while monotonic() <= end_at:
+        while not end_at.poll_expired():
             frame = self.capture_frame()
             found, text = self._ocr_keywords_in_frame(
                 frame,
@@ -217,8 +218,8 @@ class FreeGachaTask(TaskVisionMixin, BaseBD2Task):
         last_text: str = "",
         interval: float = 0.5,
     ) -> tuple[str, bool, str]:
-        end_at = monotonic() + float(self.config.get("loading 消失等待秒数", 35.0))
-        while monotonic() <= end_at:
+        end_at = PollDeadline(float(self.config.get("loading 消失等待秒数", 35.0)), monotonic)
+        while not end_at.poll_expired():
             frame = self.capture_frame()
             found, text = self._ocr_keywords_in_frame(
                 frame,
@@ -245,8 +246,8 @@ class FreeGachaTask(TaskVisionMixin, BaseBD2Task):
         name: str,
         interval: float = 0.35,
     ) -> bool:
-        end_at = monotonic() + float(self.config.get("loading 出现等待秒数", 6.0))
-        while monotonic() <= end_at:
+        end_at = PollDeadline(float(self.config.get("loading 出现等待秒数", 6.0)), monotonic)
+        while not end_at.poll_expired():
             frame = self.capture_frame()
             if self._home_confirmation_ok(frame, name):
                 return True
@@ -265,8 +266,8 @@ class FreeGachaTask(TaskVisionMixin, BaseBD2Task):
         name: str,
         interval: float = 0.35,
     ) -> bool:
-        end_at = monotonic() + float(self.config.get("loading 消失等待秒数", 35.0))
-        while monotonic() <= end_at:
+        end_at = PollDeadline(float(self.config.get("loading 消失等待秒数", 35.0)), monotonic)
+        while not end_at.poll_expired():
             frame = self.capture_frame()
             if self._home_confirmation_ok(frame, name):
                 return True
@@ -377,9 +378,9 @@ class FreeGachaTask(TaskVisionMixin, BaseBD2Task):
         name: str,
         interval: float = 0.35,
     ) -> bool:
-        end_at = monotonic() + max(0.0, timeout)
+        end_at = PollDeadline(max(0.0, timeout), monotonic)
         last_score = -1.0
-        while monotonic() <= end_at:
+        while not end_at.poll_expired():
             frame = self.capture_frame()
             result = self._match(frame, spec)
             last_score = result.score
@@ -399,9 +400,9 @@ class FreeGachaTask(TaskVisionMixin, BaseBD2Task):
         name: str,
         interval: float = 0.5,
     ) -> tuple[bool, str]:
-        end_at = monotonic() + max(0.0, timeout)
+        end_at = PollDeadline(max(0.0, timeout), monotonic)
         last_text = ""
-        while monotonic() <= end_at:
+        while not end_at.poll_expired():
             frame = self.capture_frame()
             found, text = self._ocr_keywords_in_frame(
                 frame,

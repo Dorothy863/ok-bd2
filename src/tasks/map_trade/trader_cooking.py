@@ -17,6 +17,7 @@ from src.tasks.map_trade.models import (
 from src.tasks.map_trade.trader_constants import COOK_SUBMENU_TEMPLATE, split_items
 from src.tasks.map_trade.vision import normalize_text
 from src.utils.calibration import FHD_1080
+from src.utils.polling import PollDeadline
 
 # The supplied 1920x1080 PC recording shows the complete recipe grid on one
 # page.  Every fixed control below is stored as a ratio; recipe and action
@@ -340,12 +341,12 @@ class CookingFlowMixin:
         return CookingRecipeOutcome.COOKED
 
     def _wait_for_cooking_list(self, timeout: float) -> CookingListSnapshot | None:
-        end_at = monotonic() + max(0.0, timeout)
+        end_at = PollDeadline(max(0.0, timeout), monotonic)
         while True:
             snapshot = self._cooking_list_snapshot()
             if snapshot is not None:
                 return snapshot
-            if monotonic() >= end_at:
+            if end_at.expired():
                 return None
             self.task.sleep(COOKING_POLL_INTERVAL)
 
@@ -373,12 +374,12 @@ class CookingFlowMixin:
         recipe: str,
         timeout: float,
     ) -> CookingDetailSnapshot | None:
-        end_at = monotonic() + max(0.0, timeout)
+        end_at = PollDeadline(max(0.0, timeout), monotonic)
         while True:
             snapshot = self._cooking_detail_snapshot(recipe)
             if snapshot is not None:
                 return snapshot
-            if monotonic() >= end_at:
+            if end_at.expired():
                 return None
             self.task.sleep(COOKING_POLL_INTERVAL)
 
@@ -387,12 +388,12 @@ class CookingFlowMixin:
         recipe: str,
         timeout: float,
     ) -> CookingDetailSnapshot | None:
-        end_at = monotonic() + max(0.0, timeout)
+        end_at = PollDeadline(max(0.0, timeout), monotonic)
         while True:
             snapshot = self._cooking_detail_snapshot(recipe)
             if snapshot is not None and snapshot.enabled:
                 return snapshot
-            if monotonic() >= end_at:
+            if end_at.expired():
                 return None
             self.task.sleep(COOKING_POLL_INTERVAL)
 
@@ -492,7 +493,7 @@ class CookingFlowMixin:
         return False
 
     def _wait_for_cooking_started(self, recipe: str, timeout: float) -> bool:
-        end_at = monotonic() + max(0.0, timeout)
+        end_at = PollDeadline(max(0.0, timeout), monotonic)
         while True:
             frame = self.vision.capture()
             detail = self._cooking_detail_snapshot(recipe, frame)
@@ -508,12 +509,12 @@ class CookingFlowMixin:
             if "制作中" in normalize_text(self.vision.simplify(text)):
                 self._status("料理状态", f"{recipe} 制作已开始")
                 return True
-            if monotonic() >= end_at:
+            if end_at.expired():
                 return False
             self.task.sleep(COOKING_POLL_INTERVAL)
 
     def _wait_for_cooking_result(self, recipe: str, timeout: float):
-        end_at = monotonic() + max(0.0, timeout)
+        end_at = PollDeadline(max(0.0, timeout), monotonic)
         last_text = ""
         while True:
             frame = self.vision.capture()
@@ -533,7 +534,7 @@ class CookingFlowMixin:
             if result_confirmed and self._cooking_detail_snapshot(recipe, frame) is not None:
                 self._status("料理状态", f"{recipe} 结果已确认：{text}")
                 return frame
-            if monotonic() >= end_at:
+            if end_at.expired():
                 self.task.log_warning(
                     f"料理：{recipe} 未识别到含料理名和数量的结果条，OCR={last_text or '-'}。"
                 )

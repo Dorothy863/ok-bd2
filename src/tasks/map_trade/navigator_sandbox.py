@@ -189,6 +189,7 @@ from src.tasks.map_trade.navigator_constants import (  # noqa: F401
     _sandbox_skill_template,
 )
 from src.tasks.map_trade.vision import normalize_text
+from src.utils.polling import PollDeadline
 
 
 class SandboxNavigationMixin:
@@ -779,13 +780,13 @@ class SandboxNavigationMixin:
         failure_message: str,
         handle_intermediate: bool = False,
     ) -> NavigationResult:
-        end_at = monotonic() + max(0.0, timeout)
+        end_at = PollDeadline(max(0.0, timeout), monotonic)
         last_state = ScreenState.UNKNOWN
         sandbox_hits = 0
         skill_group_switch_attempted = False
         switch_group_one_history: list[bool] = []
         group_two_streak = 0
-        while monotonic() <= end_at:
+        while not end_at.poll_expired():
             frame = self.vision.capture()
             last_state = self.classify(frame)
             self._status("导航状态", last_state.value)
@@ -938,9 +939,9 @@ class SandboxNavigationMixin:
     ) -> bool:
         """Click the portal interaction prompt when the character is already nearby."""
 
-        end_at = monotonic() + max(0.0, timeout)
+        end_at = PollDeadline(max(0.0, timeout), monotonic)
         last = MatchResult(-1.0, (0, 0), (0, 0))
-        while monotonic() <= end_at:
+        while not end_at.poll_expired():
             frame = self.vision.capture()
             last = self.vision.match(frame, HAND_TEMPLATE)
             passed = self.vision.passes(last, HAND_TEMPLATE)
@@ -980,10 +981,10 @@ class SandboxNavigationMixin:
     ) -> NavigationResult:
         """Confirm a stable visual mode and reject entry/page semantic conflicts."""
 
-        end_at = monotonic() + max(0.0, timeout)
+        end_at = PollDeadline(max(0.0, timeout), monotonic)
         last_state = ScreenState.UNKNOWN
         stable_hits = 0
-        while monotonic() <= end_at:
+        while not end_at.poll_expired():
             frame = self.vision.capture()
             detection = self._detect_map_page_mode(frame)
             if detection.mode.is_teleport_map:
@@ -1042,8 +1043,8 @@ class SandboxNavigationMixin:
     ) -> bool:
         """Open the upper-left sandbox navigation map from a recognized icon."""
 
-        end_at = monotonic() + max(0.0, timeout)
-        while monotonic() <= end_at:
+        end_at = PollDeadline(max(0.0, timeout), monotonic)
+        while not end_at.poll_expired():
             frame = self.vision.capture()
             for spec in SANDBOX_NAVIGATION_OPEN_TEMPLATES:
                 result = self.vision.match(frame, spec)
@@ -1168,10 +1169,10 @@ class SandboxNavigationMixin:
                 "未识别到左上导航地图入口，无法转入徒步回退",
             )
 
-        end_at = monotonic() + SANDBOX_NAVIGATION_MAP_TIMEOUT
+        end_at = PollDeadline(SANDBOX_NAVIGATION_MAP_TIMEOUT, monotonic)
         teleport = None
         teleport_frame = None
-        while monotonic() <= end_at:
+        while not end_at.poll_expired():
             frame = self.vision.capture()
             page_confirmed = self._sandbox_navigation_page_has_keyword(frame)
             teleport = self._sandbox_navigation_teleport(frame) if page_confirmed else None
@@ -1196,9 +1197,9 @@ class SandboxNavigationMixin:
             teleport_frame.shape,
             after_sleep=SANDBOX_NAVIGATION_TELEPORT_SETTLE_SECONDS,
         )
-        menu_end_at = monotonic() + SANDBOX_NAVIGATION_CONFIRM_TIMEOUT
+        menu_end_at = PollDeadline(SANDBOX_NAVIGATION_CONFIRM_TIMEOUT, monotonic)
         destination_confirmed = False
-        while monotonic() <= menu_end_at:
+        while not menu_end_at.poll_expired():
             menu_frame = self.vision.capture()
             if self._click_sandbox_navigation_menu_teleport(menu_frame):
                 self.task.sleep(SANDBOX_NAVIGATION_OCR_INTERVAL)
@@ -1264,7 +1265,7 @@ class SandboxNavigationMixin:
     ) -> bool:
         """Require two consistent local evidence observations before clicking."""
 
-        end_at = monotonic() + max(0.0, timeout)
+        end_at = PollDeadline(max(0.0, timeout), monotonic)
         detector = ActionIconDetector(self.vision)
         previous = None
         stable_hits = 0
@@ -1274,7 +1275,7 @@ class SandboxNavigationMixin:
             reason="未执行识别",
             semantic_state="absent",
         )
-        while monotonic() <= end_at:
+        while not end_at.poll_expired():
             frame = self.vision.capture()
             geometry = self._sandbox_frame_geometry(frame)
             if geometry is False or (geometry is not None and not geometry.accepted):
@@ -1366,9 +1367,9 @@ class SandboxNavigationMixin:
     ) -> bool:
         """Click the sandbox's fifth teleport skill from a strict match center."""
 
-        end_at = monotonic() + max(0.0, timeout)
+        end_at = PollDeadline(max(0.0, timeout), monotonic)
         last = MatchResult(-1.0, (0, 0), (0, 0))
-        while monotonic() <= end_at:
+        while not end_at.poll_expired():
             frame = self.vision.capture()
             last = self.vision.match(frame, SANDBOX_TELEPORT_SKILL_TEMPLATE)
             passed = self.vision.passes(last, SANDBOX_TELEPORT_SKILL_TEMPLATE)
@@ -1494,9 +1495,9 @@ class SandboxNavigationMixin:
             frame_shape,
             after_sleep=AREA_MAP_CLICK_SETTLE_SECONDS,
         )
-        end_at = monotonic() + max(0.0, timeout)
+        end_at = PollDeadline(max(0.0, timeout), monotonic)
         last_text = ""
-        while monotonic() <= end_at:
+        while not end_at.poll_expired():
             frame = self.vision.capture()
             try:
                 generate_center, matched_keywords, last_text = self._teleport_generation_boxes(
@@ -1857,9 +1858,9 @@ class SandboxNavigationMixin:
         card: CardSpec,
         timeout: float = TELEPORT_MAP_OPEN_TIMEOUT,
     ) -> AreaMapContext | NavigationResult:
-        end_at = monotonic() + max(0.0, timeout)
+        end_at = PollDeadline(max(0.0, timeout), monotonic)
         last = None
-        while monotonic() <= end_at:
+        while not end_at.poll_expired():
             last = self._capture_area_map_context(card)
             if last.is_area_map:
                 if len(last.candidate_target_keys) > 1:
@@ -2084,8 +2085,8 @@ class SandboxNavigationMixin:
         card: CardSpec,
         previous: AreaMapContext,
     ) -> AreaMapContext | None:
-        end_at = monotonic() + AREA_MAP_CHANGE_TIMEOUT
-        while monotonic() <= end_at:
+        end_at = PollDeadline(AREA_MAP_CHANGE_TIMEOUT, monotonic)
+        while not end_at.poll_expired():
             current = self._capture_area_map_context(card)
             if current.is_area_map and (
                 current.normalized_text != previous.normalized_text

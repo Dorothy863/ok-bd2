@@ -55,6 +55,7 @@ from src.tasks.map_trade.collector_constants import (  # noqa: F401
 )
 from src.tasks.map_trade.models import CollectionMapRole, MatchResult
 from src.tasks.map_trade.vision import parse_used_limit
+from src.utils.polling import PollDeadline
 
 
 class SkillExecutionMixin:
@@ -351,7 +352,7 @@ class SkillExecutionMixin:
             *(('success', value) for value in ACTION_SUCCESS_FEEDBACK[action.name]),
             *(('failure', value) for value in ACTION_FAILURE_FEEDBACK.get(action.name, ())),
         )
-        end_at = monotonic() + ACTION_FEEDBACK_TIMEOUT
+        end_at = PollDeadline(ACTION_FEEDBACK_TIMEOUT, monotonic)
         while True:
             text = self.vision.ocr_text(
                 self.vision.capture(),
@@ -404,7 +405,7 @@ class SkillExecutionMixin:
             )
             if feedback_recognized:
                 break
-            remaining = end_at - monotonic()
+            remaining = end_at.remaining()
             if remaining <= 0:
                 break
             self.task.sleep(min(ACTION_OCR_WINDOW_INTERVAL, remaining))
@@ -519,9 +520,9 @@ class SkillExecutionMixin:
                 ),
             )
         self._wait_after_feedback_match(search_action, feedback)
-        end_at = monotonic() + SEARCH_COUNTDOWN_TIMEOUT
+        end_at = PollDeadline(SEARCH_COUNTDOWN_TIMEOUT, monotonic)
         last_text = ""
-        while monotonic() <= end_at:
+        while not end_at.poll_expired():
             frame = self.vision.capture()
             # The normal search glyph is covered by the countdown digits as
             # soon as the action starts.  Its absence (or a transient
@@ -545,9 +546,9 @@ class SkillExecutionMixin:
         )
 
     def _verify_search_countdown(self, session: SearchCountdownSession) -> bool:
-        end_at = monotonic() + SEARCH_COUNTDOWN_TIMEOUT
+        end_at = PollDeadline(SEARCH_COUNTDOWN_TIMEOUT, monotonic)
         last_text = ""
-        while monotonic() <= end_at:
+        while not end_at.poll_expired():
             last_text = self.vision.ocr_text(
                 self.vision.capture(),
                 "战斗区域1探查倒计时",

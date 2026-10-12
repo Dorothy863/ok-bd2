@@ -87,6 +87,7 @@ from src.tasks.map_trade.trader_constants import (  # noqa: F401
     split_items,
 )
 from src.tasks.map_trade.vision import normalize_text
+from src.utils.polling import PollDeadline
 
 
 class BuyFlowMixin:
@@ -125,7 +126,7 @@ class BuyFlowMixin:
         self,
         timeout: float = BUY_TO_SELL_TIMEOUT,
     ) -> bool:
-        end_at = monotonic() + max(0.0, timeout)
+        end_at = PollDeadline(max(0.0, timeout), monotonic)
         sold_out_hits = 0
         last_title = ""
         last_match = None
@@ -165,7 +166,7 @@ class BuyFlowMixin:
                     after_sleep=BUY_TO_SELL_POST_CLICK_DELAY,
                 )
                 return self._ensure_sell_page()
-            if monotonic() >= end_at:
+            if end_at.expired():
                 break
             self.task.sleep(BUY_TO_SELL_INTERVAL)
         score_text = (
@@ -213,7 +214,7 @@ class BuyFlowMixin:
         self,
         timeout: float = BUY_ALL_FAVORITES_TIMEOUT,
     ) -> tuple[tuple[int, int], np.ndarray] | None:
-        end_at = monotonic() + max(0.0, timeout)
+        end_at = PollDeadline(max(0.0, timeout), monotonic)
         consecutive_hits = 0
         last_text = ""
         last_center: tuple[int, int] | None = None
@@ -259,7 +260,7 @@ class BuyFlowMixin:
                 and last_frame is not None
             ):
                 return last_center, last_frame
-            if monotonic() >= end_at:
+            if end_at.expired():
                 break
             self.task.sleep(BUY_ALL_FAVORITES_INTERVAL)
         self.task.log_warning(
@@ -271,7 +272,7 @@ class BuyFlowMixin:
         self,
         timeout: float = BUY_CONFIRM_TIMEOUT,
     ) -> bool:
-        end_at = monotonic() + max(0.0, timeout)
+        end_at = PollDeadline(max(0.0, timeout), monotonic)
         last_text = ""
         while True:
             frame = self.vision.capture()
@@ -292,7 +293,7 @@ class BuyFlowMixin:
             )
             if matched == len(BUY_CONFIRM_KEYWORDS):
                 return True
-            if monotonic() >= end_at:
+            if end_at.expired():
                 break
             self.task.sleep(BUY_CONFIRM_INTERVAL)
         self.task.log_warning(

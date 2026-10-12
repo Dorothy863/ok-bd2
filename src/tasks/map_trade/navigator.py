@@ -193,6 +193,7 @@ from src.utils.home_confirmation import (
     home_left_column_hits,
     home_left_column_p95_brightness,
 )
+from src.utils.polling import PollDeadline
 
 
 class Navigator(StoryCardNavigationMixin, SandboxNavigationMixin, TradeNavigationMixin):
@@ -470,9 +471,9 @@ class Navigator(StoryCardNavigationMixin, SandboxNavigationMixin, TradeNavigatio
         )
 
     def wait_state(self, wanted: set[ScreenState], timeout: float) -> ScreenState:
-        end_at = monotonic() + max(0.0, timeout)
+        end_at = PollDeadline(max(0.0, timeout), monotonic)
         last = ScreenState.UNKNOWN
-        while monotonic() <= end_at:
+        while not end_at.poll_expired():
             last = self.classify()
             self._status("导航状态", last.value)
             if last in wanted:
@@ -483,9 +484,9 @@ class Navigator(StoryCardNavigationMixin, SandboxNavigationMixin, TradeNavigatio
     def wait_trade_state(self, wanted: set[ScreenState], timeout: float) -> ScreenState:
         """Wait for a running-trade state; merchant templates stay scoped here."""
 
-        end_at = monotonic() + max(0.0, timeout)
+        end_at = PollDeadline(max(0.0, timeout), monotonic)
         last = ScreenState.UNKNOWN
-        while monotonic() <= end_at:
+        while not end_at.poll_expired():
             last = self.classify_trade()
             self._status("跑商导航状态", last.value)
             if last in wanted:
@@ -503,12 +504,12 @@ class Navigator(StoryCardNavigationMixin, SandboxNavigationMixin, TradeNavigatio
         *,
         allow_return_announcement_cleanup: bool = False,
     ) -> bool:
-        end_at = monotonic() + max(0.0, timeout)
+        end_at = PollDeadline(max(0.0, timeout), monotonic)
         last_left_hits = 0
         last_p95 = 0.0
         last_gacha_text = ""
         announcement_clicks = 0
-        while monotonic() <= end_at:
+        while not end_at.poll_expired():
             frame = self.vision.capture()
             (
                 confirmed,
@@ -674,9 +675,9 @@ class Navigator(StoryCardNavigationMixin, SandboxNavigationMixin, TradeNavigatio
         interval: float = 0.5,
         relative_roi: tuple[float, float, float, float] | None = None,
     ) -> bool:
-        end_at = monotonic() + max(0.0, timeout)
+        end_at = PollDeadline(max(0.0, timeout), monotonic)
         last_text = ""
-        while monotonic() <= end_at:
+        while not end_at.poll_expired():
             frame = self.vision.capture()
             matched, text = self._ocr_keywords_in_frame(
                 frame,

@@ -99,6 +99,7 @@ from src.tasks.map_trade.trader_constants import (  # noqa: F401
 )
 from src.tasks.map_trade.vision import normalize_text
 from src.utils.image_utils import to_gray
+from src.utils.polling import PollDeadline
 
 
 class SellFlowMixin:
@@ -142,7 +143,7 @@ class SellFlowMixin:
         *,
         allow_switch: bool = True,
     ) -> bool:
-        end_at = monotonic() + max(0.0, timeout)
+        end_at = PollDeadline(max(0.0, timeout), monotonic)
         switch_clicks = 0
         last_text = ""
         while True:
@@ -169,7 +170,7 @@ class SellFlowMixin:
                 )
                 self.task.operate_click(*SELL_MODE_POINT, after_sleep=0.5)
                 continue
-            if monotonic() >= end_at:
+            if end_at.expired():
                 break
             self.task.sleep(SHOP_MODE_INTERVAL)
         self.task.log_warning(
@@ -439,7 +440,7 @@ class SellFlowMixin:
     ) -> tuple[list[SaleItemCandidate], np.ndarray] | None:
         """Wait for all OCR-confirmed sale cards for one calendar entry."""
 
-        end_at = monotonic() + max(0.0, timeout)
+        end_at = PollDeadline(max(0.0, timeout), monotonic)
         last_reason = ""
         empty_name_hits = 0
         while True:
@@ -459,7 +460,7 @@ class SellFlowMixin:
                 self._last_sale_page_empty = True
                 self._last_sale_reason = last_reason
                 return None
-            if monotonic() >= end_at:
+            if end_at.expired():
                 break
             self.task.sleep(interval)
         self._last_sale_page_empty = empty_name_hits >= SALE_EMPTY_NAME_STABLE_HITS
@@ -799,7 +800,7 @@ class SellFlowMixin:
 
         if before_toast_id is None:
             before_toast_id = self._sale_toast_id(before_frame)
-        end_at = monotonic() + max(0.0, timeout)
+        end_at = PollDeadline(max(0.0, timeout), monotonic)
         changed_signature: tuple[tuple[str, int, int, int, int], ...] | None = None
         stable_hits = 0
         last_text = ""
@@ -838,7 +839,7 @@ class SellFlowMixin:
                     if stable_hits >= SALE_COMPLETION_STABLE_HITS:
                         self._status("出售完成确认", f"{entry.item}:页面重排")
                         return True
-            if monotonic() >= end_at:
+            if end_at.expired():
                 break
             self.task.sleep(SALE_COMPLETION_INTERVAL)
         self.task.log_warning(
@@ -915,7 +916,7 @@ class SellFlowMixin:
     ) -> bool:
         names = (entry.item, *entry.aliases, *ITEM_ALIASES.get(entry.item, ()))
         normalized_names = tuple(self._normal(value) for value in names if value)
-        end_at = monotonic() + max(0.0, timeout)
+        end_at = PollDeadline(max(0.0, timeout), monotonic)
         while True:
             text = self.vision.ocr_text(
                 self.vision.capture(),
@@ -925,12 +926,12 @@ class SellFlowMixin:
             normalized = self._normal(text)
             if self._sale_name_matches(normalized, normalized_names):
                 return True
-            if monotonic() >= end_at:
+            if end_at.expired():
                 return False
             self.task.sleep(SALE_OCR_INTERVAL)
 
     def _wait_owned_quantity(self, timeout: float = SALE_DIALOG_TIMEOUT) -> int | None:
-        end_at = monotonic() + max(0.0, timeout)
+        end_at = PollDeadline(max(0.0, timeout), monotonic)
         while True:
             text = self.vision.ocr_text(
                 self.vision.capture(),
@@ -943,7 +944,7 @@ class SellFlowMixin:
                 quantity = self._quantity_from_text(matched.group(1))
                 if quantity is not None:
                     return quantity
-            if monotonic() >= end_at:
+            if end_at.expired():
                 return None
             self.task.sleep(SALE_OCR_INTERVAL)
 
@@ -951,7 +952,7 @@ class SellFlowMixin:
         self,
         timeout: float = SALE_DIALOG_TIMEOUT,
     ) -> int | None:
-        end_at = monotonic() + max(0.0, timeout)
+        end_at = PollDeadline(max(0.0, timeout), monotonic)
         while True:
             text = self.vision.ocr_text(
                 self.vision.capture(),
@@ -964,7 +965,7 @@ class SellFlowMixin:
                 quantity = self._quantity_from_text(matched.group(1))
                 if quantity is not None and quantity > 0:
                     return quantity
-            if monotonic() >= end_at:
+            if end_at.expired():
                 return None
             self.task.sleep(SALE_OCR_INTERVAL)
 
@@ -973,7 +974,7 @@ class SellFlowMixin:
         expected: int | None,
         timeout: float = SALE_DIALOG_TIMEOUT,
     ) -> bool:
-        end_at = monotonic() + max(0.0, timeout)
+        end_at = PollDeadline(max(0.0, timeout), monotonic)
         while True:
             text = self.vision.ocr_text(
                 self.vision.capture(),
@@ -985,7 +986,7 @@ class SellFlowMixin:
                 if expected is None or selected == expected:
                     self._status("出售已选数量", str(selected))
                     return True
-            if monotonic() >= end_at:
+            if end_at.expired():
                 return False
             self.task.sleep(SALE_OCR_INTERVAL)
 

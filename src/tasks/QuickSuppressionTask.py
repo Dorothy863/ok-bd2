@@ -13,6 +13,7 @@ from src.utils.image_utils import (
     template_match_response,
     to_gray,
 )
+from src.utils.polling import PollDeadline
 from src.utils.template_resolution import offline_template_scale
 
 REFERENCE_WIDTH = FHD_1080.width
@@ -152,8 +153,8 @@ class QuickSuppressionTask(BaseBD2Task):
 
     def _wait_for_loading_cycle(self, chapter_name: str) -> bool:
         interval = max(0.1, float(self.config.get("loading 识别间隔秒数", 0.5)))
-        appear_end = monotonic() + float(self.config.get("loading 出现等待秒数", 10.0))
-        while monotonic() <= appear_end:
+        appear_end = PollDeadline(self.config.get("loading 出现等待秒数", 10.0), monotonic)
+        while not appear_end.poll_expired():
             score = self._loading_score(self.capture_frame())
             self.info_set("loading 出现", f"{score:.3f}")
             if score >= self._loading_threshold():
@@ -163,8 +164,8 @@ class QuickSuppressionTask(BaseBD2Task):
             self.log_info(f"刷压制等级：切换{chapter_name}时未检测到加载画面。")
             return False
 
-        disappear_end = monotonic() + float(self.config.get("loading 消失等待秒数", 45.0))
-        while monotonic() <= disappear_end:
+        disappear_end = PollDeadline(self.config.get("loading 消失等待秒数", 45.0), monotonic)
+        while not disappear_end.poll_expired():
             score = self._loading_score(self.capture_frame())
             self.info_set("loading 消失", f"{score:.3f}")
             if score < self._loading_threshold():

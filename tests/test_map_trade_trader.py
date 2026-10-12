@@ -2180,7 +2180,7 @@ class BuyEntryTest(unittest.TestCase):
 
                 with patch(
                     "src.tasks.map_trade.navigator_trade.monotonic",
-                    side_effect=(0.0, 1.0),
+                    side_effect=(0.0, 1.0, 2.0),
                 ):
                     self.assertFalse(
                         navigator._click_merchant_interaction(

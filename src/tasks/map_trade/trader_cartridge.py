@@ -90,6 +90,7 @@ from src.tasks.map_trade.trader_constants import (  # noqa: F401
     split_items,
 )
 from src.tasks.map_trade.vision import normalize_text
+from src.utils.polling import PollDeadline
 
 
 class ShopCartridgeNavigationMixin:
@@ -267,8 +268,8 @@ class ShopCartridgeNavigationMixin:
         timeout: float = 4.0,
         interval: float = 0.25,
     ) -> bool:
-        end_at = monotonic() + max(0.0, timeout)
-        while monotonic() <= end_at:
+        end_at = PollDeadline(max(0.0, timeout), monotonic)
+        while not end_at.poll_expired():
             frame = self.vision.capture()
             confirmed = self._confirmed_shop_cartridge_detections(frame)
             if all(shop_id in confirmed for shop_id in confirmation_shop_ids):
@@ -545,8 +546,8 @@ class ShopCartridgeNavigationMixin:
         timeout: float = 3.0,
         interval: float = 0.25,
     ) -> tuple[np.ndarray, TemplateSpec, MatchResult] | None:
-        end_at = monotonic() + max(0.0, timeout)
-        while monotonic() <= end_at:
+        end_at = PollDeadline(max(0.0, timeout), monotonic)
+        while not end_at.poll_expired():
             frame = self.vision.capture()
             detection = self._confirmed_shop_cartridge_detections(frame).get(shop_id)
             if detection is not None:
@@ -563,8 +564,8 @@ class ShopCartridgeNavigationMixin:
             frame, spec, result = found
             self.vision.click_client(result.center, frame.shape, after_sleep=0.5)
 
-            end_at = monotonic() + 4.0
-            while monotonic() <= end_at:
+            end_at = PollDeadline(4.0, monotonic)
+            while not end_at.poll_expired():
                 selected_frame = self.vision.capture()
                 selected = self._confirmed_shop_cartridge_detections(
                     selected_frame

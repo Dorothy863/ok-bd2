@@ -923,7 +923,7 @@ class HiddenConfigRowsTest(QuestUiTestBase):
         percentage_keys = [
             key for key in task.default_config if str(key).endswith("百分比")
         ]
-        self.assertEqual(len(percentage_keys), 8)
+        self.assertEqual(len(percentage_keys), 12)
         for key in percentage_keys:
             self.assertTrue(task.config_type[key]["hidden"])
 

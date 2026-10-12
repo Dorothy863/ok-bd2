@@ -195,6 +195,7 @@ from src.tasks.map_trade.navigator_constants import (  # noqa: F401
     _sandbox_skill_template,
 )
 from src.tasks.map_trade.vision import normalize_text
+from src.utils.polling import PollDeadline
 
 
 class StoryCardNavigationMixin:
@@ -231,11 +232,11 @@ class StoryCardNavigationMixin:
         return NavigationResult(True, ScreenState.CARD_MENU, "剧情游戏卡类别已确认")
 
     def _wait_for_story_category(self, timeout: float = 3.0, interval: float = 0.5) -> bool:
-        end_at = monotonic() + max(0.0, timeout)
+        end_at = PollDeadline(max(0.0, timeout), monotonic)
         last_text = ""
         last_highlight_ratio = 0.0
         story_label = normalize_text("剧情游戏卡")
-        while monotonic() <= end_at:
+        while not end_at.poll_expired():
             frame = self.vision.capture()
             text = self.vision.simplify(self.vision.ocr_text(frame, "剧情游戏卡类别"))
             last_text = text or last_text
@@ -1306,9 +1307,9 @@ class StoryCardNavigationMixin:
         timeout: float = 3.0,
         interval: float = 0.25,
     ) -> tuple[np.ndarray, StoryBadgeDetection] | None:
-        end_at = monotonic() + max(0.0, timeout)
+        end_at = PollDeadline(max(0.0, timeout), monotonic)
         last_reason = "未执行识别"
-        while monotonic() <= end_at:
+        while not end_at.poll_expired():
             frame = self.vision.capture()
             detection, last_reason = self._find_story_badge(frame, target_number)
             if detection is not None:

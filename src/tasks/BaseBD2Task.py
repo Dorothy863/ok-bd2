@@ -30,6 +30,7 @@ from src.utils.image_utils import (
     to_gray,
 )
 from src.utils.ocr_utils import normalize_ocr_text
+from src.utils.polling import PollDeadline
 from src.utils.template_resolution import offline_template_scale
 
 logger = Logger.get_logger(__name__)
@@ -497,8 +498,8 @@ class BaseBD2Task(BaseTask):
                     (t_width, t_height),
                     interpolation=cv2.INTER_AREA,
                 )
-                result = cv2.matchTemplate(crop, resized, cv2.TM_CCOEFF_NORMED)
-                _min_v, max_v, _min_loc, max_loc = cv2.minMaxLoc(result)
+                response = template_match_response(crop, resized)
+                _min_v, max_v, _min_loc, max_loc = cv2.minMaxLoc(response)
                 if best is None or max_v > best[0]:
                     best = (max_v, max_loc[0], max_loc[1], t_width, t_height)
             if best is None or best[0] < threshold:
@@ -905,7 +906,7 @@ class BaseBD2Task(BaseTask):
         """OCR and dismiss PVP promotion, demotion, and season reward pages."""
         if allow_season_reward is None:
             allow_season_reward = self._is_beijing_monday()
-        end_at = monotonic() + max(0.0, float(timeout))
+        end_at = PollDeadline(max(0.0, float(timeout)), monotonic)
         handled: set[str] = set()
         action_count = 0
 
@@ -932,7 +933,7 @@ class BaseBD2Task(BaseTask):
                     action_count += 1
 
             if (
-                monotonic() >= end_at
+                end_at.expired()
                 or action_count >= RECENT_CARTRIDGE_SPECIAL_PAGE_MAX_ACTIONS
             ):
                 break

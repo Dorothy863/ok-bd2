@@ -40,6 +40,7 @@ from src.utils.image_utils import (
     stabilize_template_match,
 )
 from src.utils.ocr_utils import normalize_ocr_text
+from src.utils.polling import PollDeadline
 
 REFERENCE_WIDTH = FHD_1080.width
 REFERENCE_HEIGHT = FHD_1080.height
@@ -294,10 +295,10 @@ class PVPTask(BaseBD2Task):
         return False
 
     def _wait_for_battle_gameplay_category(self, interval: float = 0.5) -> bool:
-        end_at = monotonic() + float(self.config.get("玩法类别高亮确认秒数", 3.0))
+        end_at = PollDeadline(float(self.config.get("玩法类别高亮确认秒数", 3.0)), monotonic)
         last_text = ""
         last_highlight_ratio = 0.0
-        while monotonic() <= end_at:
+        while not end_at.poll_expired():
             frame = self.capture_frame()
             text = self._ocr_text(
                 frame,
@@ -332,9 +333,9 @@ class PVPTask(BaseBD2Task):
 
     def _wait_for_quick_switch_page(self, interval: float = 0.5) -> bool:
         self.info_set("当前阶段", "确认卡带选择页")
-        end_at = monotonic() + float(self.config.get("卡带选择页确认等待秒数", 10.0))
+        end_at = PollDeadline(float(self.config.get("卡带选择页确认等待秒数", 10.0)), monotonic)
         last_text = ""
-        while monotonic() <= end_at:
+        while not end_at.poll_expired():
             frame = self.capture_frame()
             text = self._ocr_text(frame, name="卡带选择页")
             last_text = text or last_text
@@ -357,11 +358,11 @@ class PVPTask(BaseBD2Task):
 
     def _wait_for_cartridge_home(self, interval: float = 0.35) -> bool:
         self.info_set("当前阶段", "确认主页")
-        end_at = monotonic() + float(self.config.get("主页确认等待秒数", 10.0))
+        end_at = PollDeadline(float(self.config.get("主页确认等待秒数", 10.0)), monotonic)
         last_left_hits = 0
         last_p95 = 0.0
         last_gacha_text = ""
-        while monotonic() <= end_at:
+        while not end_at.poll_expired():
             frame = self.capture_frame()
             home_ok, last_left_hits, last_p95, gacha_text = (
                 self._home_confirmation_signals(frame)
@@ -401,7 +402,7 @@ class PVPTask(BaseBD2Task):
         interval: float = 0.5,
     ) -> bool:
         """Handle every PVP entry special page before accepting the PVP hub."""
-        end_at = monotonic() + max(0.0, timeout)
+        end_at = PollDeadline(max(0.0, timeout), monotonic)
         handled: set[str] = set()
         action_count = 0
         last_text = ""
@@ -415,7 +416,7 @@ class PVPTask(BaseBD2Task):
 
         while True:
             now = monotonic()
-            if now > end_at:
+            if end_at.expired(now):
                 break
             frame = self.capture_frame()
             boxes = self._pvp_special_page_ocr_boxes(
@@ -569,8 +570,8 @@ class PVPTask(BaseBD2Task):
 
     def _wait_battle_start_or_ap_shortage(self, multiplier: int) -> str:
         timeout = float(self.config.get("PVP 战斗开始等待秒数", 30.0))
-        deadline = monotonic() + max(0.0, timeout)
-        while monotonic() <= deadline:
+        deadline = PollDeadline(max(0.0, timeout), monotonic)
+        while not deadline.expired():
             frame = self.capture_frame()
             if frame is not None:
                 battle_text = self._ocr_text(
@@ -741,9 +742,9 @@ class PVPTask(BaseBD2Task):
         ]
 
     def _click_leave_button(self) -> bool:
-        end_at = monotonic() + float(self.config.get("PVP 离开等待秒数", 20.0))
+        end_at = PollDeadline(float(self.config.get("PVP 离开等待秒数", 20.0)), monotonic)
         last_text = ""
-        while monotonic() <= end_at:
+        while not end_at.poll_expired():
             frame = self.capture_frame()
             combined_text, matched_point = self._leave_button_ocr(frame)
             last_text = combined_text or last_text
@@ -805,10 +806,10 @@ class PVPTask(BaseBD2Task):
     def _ensure_pvp_hub_after_leave(self) -> bool:
         self.info_set("当前阶段", "确认离开结果")
         timeout = float(self.config.get("PVP 返回箱庭等待秒数", 10.0))
-        end_at = monotonic() + max(0.0, timeout)
+        end_at = PollDeadline(max(0.0, timeout), monotonic)
         leave_retried = False
         while True:
-            remaining = max(0.0, end_at - monotonic())
+            remaining = end_at.remaining()
             state, text, point = self._wait_for_pvp_hub_or_confirm(
                 timeout=remaining,
                 return_on_leave=not leave_retried,
@@ -891,12 +892,12 @@ class PVPTask(BaseBD2Task):
         interval: float = 0.5,
         return_on_leave: bool = True,
     ) -> tuple[str, str, tuple[float, float] | None]:
-        end_at = monotonic() + max(0.0, timeout)
+        end_at = PollDeadline(max(0.0, timeout), monotonic)
         last_text = ""
         last_hub_score = -1.0
         last_leave_text = ""
         last_leave_point: tuple[float, float] | None = None
-        while monotonic() <= end_at:
+        while not end_at.poll_expired():
             frame = self.capture_frame()
 
             hub = self._match(frame, PVP_MEDALS_TEMPLATE)
@@ -997,8 +998,8 @@ class PVPTask(BaseBD2Task):
         return home_ok
 
     def _wait_for_home(self, timeout: float, interval: float = 0.5) -> bool:
-        end_at = monotonic() + max(0.0, timeout)
-        while monotonic() <= end_at:
+        end_at = PollDeadline(max(0.0, timeout), monotonic)
+        while not end_at.poll_expired():
             frame = self.capture_frame()
             home_ok, left_hits, p95_brightness, gacha_text = (
                 self._home_confirmation_signals(frame)
@@ -1109,9 +1110,9 @@ class PVPTask(BaseBD2Task):
         interval: float = 0.35,
         stabilize: bool = False,
     ) -> bool:
-        end_at = monotonic() + max(0.0, timeout)
+        end_at = PollDeadline(max(0.0, timeout), monotonic)
         last_score = -1.0
-        while monotonic() <= end_at:
+        while not end_at.poll_expired():
             frame = self.capture_frame()
             frame_height, frame_width = frame.shape[:2]
             result = self._match(frame, spec)
@@ -1193,9 +1194,9 @@ class PVPTask(BaseBD2Task):
         name: str,
         interval: float = 0.35,
     ) -> tuple[MatchResult | None, tuple[int, int] | None]:
-        end_at = monotonic() + max(0.0, timeout)
+        end_at = PollDeadline(max(0.0, timeout), monotonic)
         last_score = -1.0
-        while monotonic() <= end_at:
+        while not end_at.poll_expired():
             frame = self.capture_frame()
             result = self._match(frame, spec)
             last_score = result.score
@@ -1214,9 +1215,9 @@ class PVPTask(BaseBD2Task):
         name: str,
         interval: float = 0.5,
     ) -> tuple[tuple[int, int] | None, tuple[int, int] | None]:
-        end_at = monotonic() + max(0.0, timeout)
+        end_at = PollDeadline(max(0.0, timeout), monotonic)
         last_text = ""
-        while monotonic() <= end_at:
+        while not end_at.poll_expired():
             frame = self.capture_frame()
             frame_height, frame_width = frame.shape[:2]
             boxes = self._ocr_boxes(frame, name=name)
@@ -1238,9 +1239,9 @@ class PVPTask(BaseBD2Task):
         name: str,
         interval: float = 0.35,
     ) -> bool:
-        end_at = monotonic() + max(0.0, timeout)
+        end_at = PollDeadline(max(0.0, timeout), monotonic)
         last_score = -1.0
-        while monotonic() <= end_at:
+        while not end_at.poll_expired():
             frame = self.capture_frame()
             result = self._match(frame, spec)
             last_score = result.score
@@ -1262,9 +1263,9 @@ class PVPTask(BaseBD2Task):
         normalize_multiplier: bool = False,
         extra_wait_patterns: list[tuple[str, tuple[int, int, int, int], str]] | None = None,
     ) -> tuple[bool, str]:
-        end_at = monotonic() + max(0.0, timeout)
+        end_at = PollDeadline(max(0.0, timeout), monotonic)
         last_text = ""
-        while monotonic() <= end_at:
+        while not end_at.poll_expired():
             frame = self.capture_frame()
             text = self._ocr_text(frame, name=name, roi=roi)
             if normalize_multiplier:
@@ -1293,9 +1294,9 @@ class PVPTask(BaseBD2Task):
         interval: float = 0.5,
         extra_wait_patterns: list[tuple[str, tuple[int, int, int, int], str]] | None = None,
     ) -> tuple[bool, str]:
-        end_at = monotonic() + max(0.0, timeout)
+        end_at = PollDeadline(max(0.0, timeout), monotonic)
         last_text = ""
-        while monotonic() <= end_at:
+        while not end_at.poll_expired():
             frame = self.capture_frame()
             text = self._ocr_text(frame, name=name, roi=roi)
             last_text = text or last_text
@@ -1322,9 +1323,9 @@ class PVPTask(BaseBD2Task):
         roi: tuple[int, int, int, int] | None = None,
         interval: float = 0.5,
     ) -> tuple[bool, str]:
-        end_at = monotonic() + max(0.0, timeout)
+        end_at = PollDeadline(max(0.0, timeout), monotonic)
         last_text = ""
-        while monotonic() <= end_at:
+        while not end_at.poll_expired():
             frame = self.capture_frame()
             entries = self._ocr_entries(frame, name=name, roi=roi)
             text = " ".join(label for label, _confidence in entries)
@@ -1344,9 +1345,9 @@ class PVPTask(BaseBD2Task):
         roi: tuple[int, int, int, int] | None = None,
         interval: float = 0.5,
     ) -> tuple[bool, str]:
-        end_at = monotonic() + max(0.0, timeout)
+        end_at = PollDeadline(max(0.0, timeout), monotonic)
         last_text = ""
-        while monotonic() <= end_at:
+        while not end_at.poll_expired():
             frame = self.capture_frame()
             text = self._ocr_text(frame, name=name, roi=roi)
             last_text = text or last_text
@@ -1367,8 +1368,8 @@ class PVPTask(BaseBD2Task):
         if not found_loading:
             return
 
-        end_at = monotonic() + float(self.config.get("loading 消失等待秒数", 35.0))
-        while monotonic() <= end_at:
+        end_at = PollDeadline(float(self.config.get("loading 消失等待秒数", 35.0)), monotonic)
+        while not end_at.poll_expired():
             frame = self.capture_frame()
             result = self._match(frame, LOADING_TEMPLATE)
             self.info_set(f"{name}_loading_gone", f"{result.score:.3f}")

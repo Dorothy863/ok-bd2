@@ -32,6 +32,7 @@ class DebugRegistryTest(unittest.TestCase):
                     "src.tasks.BD2InputTestTask",
                     "BD2BackgroundMouseClickInputTestTask",
                 ],
+                ["src.tasks.BD2SceneEscProbeTask", "BD2SceneEscProbeTask"],
             ],
             DEBUG_ONETIME_TASKS,
         )

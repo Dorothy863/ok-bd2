@@ -16,6 +16,7 @@ from src.tasks.task_vision_mixin import (
     TaskVisionMixin,
 )
 from src.utils.home_confirmation import HOME_LEFT_COLUMN_REQUIRED_HITS
+from src.utils.polling import PollDeadline
 
 QUICK_HUNT_CHILD_CONFIG_KEYS = (
     "快速狩猎冒险航线",
@@ -458,11 +459,11 @@ class QuickHuntFeatureMixin:
         return self._home_confirmation_signals(frame, "快速狩猎主页抽抽乐")
 
     def _wait_for_quick_hunt_home(self, interval: float = 0.35) -> bool:
-        end_at = monotonic() + float(self.config.get("主页确认等待秒数", 10.0))
+        end_at = PollDeadline(float(self.config.get("主页确认等待秒数", 10.0)), monotonic)
         last_left_hits = 0
         last_p95 = 0.0
         last_gacha_text = ""
-        while monotonic() <= end_at:
+        while not end_at.poll_expired():
             frame = self.capture_frame()
             home_ok, last_left_hits, last_p95, last_gacha_text = (
                 self._quick_hunt_home_signals(frame)
@@ -823,8 +824,8 @@ class QuickHuntFeatureMixin:
         return self._quick_hunt_wait_result(stage)
 
     def _quick_hunt_wait_result(self, stage: str) -> str:
-        end_at = monotonic() + float(self.config.get("快速狩猎结算等待秒数", 15.0))
-        while monotonic() <= end_at:
+        end_at = PollDeadline(float(self.config.get("快速狩猎结算等待秒数", 15.0)), monotonic)
+        while not end_at.poll_expired():
             frame = self.capture_frame()
             reward_text = self._quick_hunt_ocr_text(
                 frame,
@@ -917,9 +918,9 @@ class QuickHuntFeatureMixin:
         name: str,
     ) -> tuple[str, object | None]:
         compiled = [re.compile(pattern, re.IGNORECASE) for pattern in patterns]
-        end_at = monotonic() + max(0.0, timeout)
+        end_at = PollDeadline(max(0.0, timeout), monotonic)
         last_text = ""
-        while monotonic() <= end_at:
+        while not end_at.poll_expired():
             frame = self.capture_frame()
             boxes = self._quick_vision().ocr_boxes(frame, name, relative_roi=roi)
             text = " ".join(str(getattr(box, "name", "")) for box in boxes)
@@ -944,9 +945,9 @@ class QuickHuntFeatureMixin:
         name: str,
     ) -> tuple[str, str, str | None]:
         expected = re.compile(expected_pattern, re.IGNORECASE)
-        end_at = monotonic() + self._quick_hunt_ui_timeout()
+        end_at = PollDeadline(self._quick_hunt_ui_timeout(), monotonic)
         last_text = ""
-        while monotonic() <= end_at:
+        while not end_at.poll_expired():
             frame = self.capture_frame()
             boxes = self._quick_vision().ocr_boxes(
                 frame,
@@ -986,10 +987,10 @@ class QuickHuntFeatureMixin:
         name: str,
         require_enabled: bool = False,
     ) -> bool:
-        end_at = monotonic() + max(0.0, timeout)
+        end_at = PollDeadline(max(0.0, timeout), monotonic)
         compiled = [re.compile(pattern, re.IGNORECASE) for pattern in patterns]
         vision = self._quick_vision()
-        while monotonic() <= end_at:
+        while not end_at.poll_expired():
             frame = self.capture_frame()
             for box in vision.ocr_boxes(frame, name, relative_roi=roi):
                 value = self._normalize_text(getattr(box, "name", ""))

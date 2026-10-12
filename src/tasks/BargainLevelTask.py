@@ -5,6 +5,7 @@ from qfluentwidgets import FluentIcon
 from src.tasks.BaseBD2Task import BaseBD2Task
 from src.utils.calibration import FHD_1080
 from src.utils.ocr_utils import keyword_match_count, normalize_ocr_text
+from src.utils.polling import PollDeadline
 
 REFERENCE_WIDTH = FHD_1080.width
 REFERENCE_HEIGHT = FHD_1080.height
@@ -176,9 +177,9 @@ class BargainLevelTask(BaseBD2Task):
         name: str,
     ) -> tuple[bool, str]:
         interval = max(0.1, float(self.config.get("OCR 识别间隔秒数", 0.25)))
-        end_at = monotonic() + max(0.0, timeout)
+        end_at = PollDeadline(max(0.0, timeout), monotonic)
         last_text = ""
-        while monotonic() <= end_at:
+        while not end_at.poll_expired():
             frame = self.capture_frame()
             last_text = self._ocr_text(frame, name=name)
             matches = self._keyword_match_count(last_text, keywords)

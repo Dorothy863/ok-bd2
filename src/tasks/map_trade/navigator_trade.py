@@ -182,6 +182,7 @@ from src.tasks.map_trade.trader_constants import (
     BUY_TO_SELL_SOLD_OUT_TEMPLATE,
 )
 from src.tasks.map_trade.vision import normalize_text
+from src.utils.polling import PollDeadline
 
 
 class TradeNavigationMixin:
@@ -286,9 +287,9 @@ class TradeNavigationMixin:
     ) -> bool:
         """Find the calibrated merchant location crop and click its center."""
 
-        end_at = monotonic() + max(0.0, timeout)
+        end_at = PollDeadline(max(0.0, timeout), monotonic)
         last = MatchResult(-1.0, (0, 0), (0, 0))
-        while monotonic() <= end_at:
+        while not end_at.poll_expired():
             frame = self.vision.capture()
             last = self.vision.match(frame, MERCHANT_CLICK_LOCATION_TEMPLATE)
             passed = self.vision.passes(last, MERCHANT_CLICK_LOCATION_TEMPLATE)
@@ -341,8 +342,8 @@ class TradeNavigationMixin:
     def _click_merchant_nav_destination(self) -> bool:
         """在导航菜单中依次 OCR 点击"商店"目的地与"确认"按钮。"""
 
-        end_at = monotonic() + MERCHANT_NAV_MENU_OCR_TIMEOUT
-        while monotonic() <= end_at:
+        end_at = PollDeadline(MERCHANT_NAV_MENU_OCR_TIMEOUT, monotonic)
+        while not end_at.poll_expired():
             if self.vision.click_ocr(
                 [r"商店"],
                 roi=MERCHANT_NAV_MENU_OCR_ROI,
@@ -355,8 +356,8 @@ class TradeNavigationMixin:
             self.task.log_warning("跑商：小地图导航菜单未识别到商店目的地。")
             return False
 
-        end_at = monotonic() + MERCHANT_NAV_MENU_OCR_TIMEOUT
-        while monotonic() <= end_at:
+        end_at = PollDeadline(MERCHANT_NAV_MENU_OCR_TIMEOUT, monotonic)
+        while not end_at.poll_expired():
             if self.vision.click_ocr(
                 [r"确认"],
                 roi=MERCHANT_NAV_CONFIRM_OCR_ROI,
@@ -371,10 +372,9 @@ class TradeNavigationMixin:
     def _wait_merchant_auto_navigation(self) -> bool:
         """等待自动移动开始并结束；地标提前进入视野时立即放行。"""
 
-        started_at = monotonic()
-        end_at = started_at + MERCHANT_AUTO_NAV_TIMEOUT
+        end_at = PollDeadline(MERCHANT_AUTO_NAV_TIMEOUT, monotonic)
         seen = False
-        while monotonic() <= end_at:
+        while not end_at.poll_expired():
             frame = self.vision.capture()
             landmark = self.vision.match(frame, MERCHANT_CLICK_LOCATION_TEMPLATE)
             if self.vision.passes(landmark, MERCHANT_CLICK_LOCATION_TEMPLATE):
@@ -392,7 +392,7 @@ class TradeNavigationMixin:
             elif seen:
                 self._status("自动移动到商店", "自动移动已结束")
                 return True
-            if not seen and monotonic() - started_at >= MERCHANT_AUTO_NAV_START_TIMEOUT:
+            if not seen and monotonic() - end_at.started_at() >= MERCHANT_AUTO_NAV_START_TIMEOUT:
                 self.task.log_warning("跑商：确认导航后未观察到自动移动。")
                 return False
             self.task.sleep(MERCHANT_AUTO_NAV_POLL_INTERVAL)
@@ -411,7 +411,7 @@ class TradeNavigationMixin:
         flow.  It is never added to the shared story or PVP classifiers.
         """
 
-        end_at = monotonic() + max(0.0, timeout)
+        end_at = PollDeadline(max(0.0, timeout), monotonic)
         last_state = ScreenState.UNKNOWN
         last = MatchResult(-1.0, (0, 0), (0, 0))
         while True:
@@ -433,7 +433,7 @@ class TradeNavigationMixin:
             )
             if last_state == ScreenState.SANDBOX and merchant_passed:
                 return True
-            if monotonic() >= end_at:
+            if end_at.expired():
                 break
             self.task.sleep(interval)
         self.task.log_warning(
@@ -480,7 +480,7 @@ class TradeNavigationMixin:
         """
 
         timeout = self._loading_timeout() if timeout is None else float(timeout)
-        end_at = monotonic() + max(0.0, timeout)
+        end_at = PollDeadline(max(0.0, timeout), monotonic)
         consecutive_hits = 0
         sold_out_hits = 0
         last_text = ""
@@ -527,7 +527,7 @@ class TradeNavigationMixin:
                     "跑商：未显示一键购买全部收藏，售罄模板已稳定命中，确认当天已购买完。"
                 )
                 return True
-            if monotonic() >= end_at:
+            if end_at.expired():
                 break
             self.task.sleep(Q_SP6_SHOP_PAGE_OCR_INTERVAL)
         self.task.log_warning(f"跑商：砍价确认后未通过OCR确认商店页面，OCR={last_text or '-'}。")
