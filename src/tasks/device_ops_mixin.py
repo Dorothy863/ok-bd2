@@ -233,12 +233,15 @@ class DeviceOpsMixin:
         duration: float = 0.7,
         after_sleep: float = 0.0,
     ) -> None:
-        """Drag with foreground mouse input only; these tasks never send keys."""
+        """Drag with foreground mouse input only; these tasks never send keys.
+
+        前景输入实现（光标定位 + 按住 + 分步移动 + 松开）收口在
+        :meth:`BD2Interaction.drag_foreground`；这里只做坐标换算（客户端坐标 →
+        绝对屏幕坐标）与前台激活，``self.operate(action, block=True,
+        restore_cursor=True)`` 的锁定 / 恢复语义保持不变。
+        """
 
         def action():
-            import win32api
-            import win32con
-
             interaction = getattr(self.executor, "interaction", None)
             if interaction is not None and hasattr(interaction, "force_activate"):
                 interaction.force_activate()
@@ -253,19 +256,7 @@ class DeviceOpsMixin:
 
             start_abs = to_screen(start)
             end_abs = to_screen(end)
-            steps = max(6, round(duration / 0.03))
-            win32api.SetCursorPos(start_abs)
-            time.sleep(0.03)
-            win32api.mouse_event(win32con.MOUSEEVENTF_LEFTDOWN, 0, 0, 0, 0)
-            try:
-                for index in range(1, steps + 1):
-                    ratio = index / steps
-                    x = round(start_abs[0] + (end_abs[0] - start_abs[0]) * ratio)
-                    y = round(start_abs[1] + (end_abs[1] - start_abs[1]) * ratio)
-                    win32api.SetCursorPos((x, y))
-                    time.sleep(duration / steps)
-            finally:
-                win32api.mouse_event(win32con.MOUSEEVENTF_LEFTUP, 0, 0, 0, 0)
+            interaction.drag_foreground(start_abs, end_abs, duration)
 
         self.operate(action, block=True, restore_cursor=True)
         self.sleep(after_sleep)
@@ -278,7 +269,11 @@ class DeviceOpsMixin:
         interval: float = 0.1,
         after_sleep: float = 0.0,
     ) -> None:
-        """Send foreground mouse-wheel events at a relative client point."""
+        """Send foreground mouse-wheel events at a relative client point.
+
+        绝对光标定位（前景输入）由 :meth:`BD2Interaction.set_foreground_cursor` 完成；
+        滚轮事件本身仍走 ``interaction.scroll``。
+        """
 
         frame = self.capture_frame()
         height, width = frame.shape[:2]
@@ -291,15 +286,13 @@ class DeviceOpsMixin:
             raise RuntimeError("当前交互对象不支持鼠标滚轮")
 
         def action():
-            import win32api
-
             if hasattr(interaction, "force_activate"):
                 interaction.force_activate()
             elif hasattr(interaction, "try_activate"):
                 interaction.try_activate()
             capture = getattr(interaction, "capture", None)
             if capture is not None and hasattr(capture, "get_abs_cords"):
-                win32api.SetCursorPos(capture.get_abs_cords(x, y))
+                interaction.set_foreground_cursor(capture.get_abs_cords(x, y))
             for index in range(wheel_count):
                 interaction.scroll(x, y, int(scroll_amount))
                 if index + 1 < wheel_count:

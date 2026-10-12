@@ -2137,6 +2137,98 @@ class PVPTaskHelperTest(unittest.TestCase):
         self.assertEqual([(True, True, True)], operates)
         self.assertEqual([0.5], sleeps)
 
+    def test_drag_client_delegates_foreground_drag_to_adapter(self):
+        """P8：任务层只做坐标换算，前景拖拽实现收口在适配器的 drag_foreground。"""
+
+        calls = []
+
+        class FakeCapture:
+            def get_abs_cords(self, x, y):
+                return (x + 100, y + 200)
+
+        class FakeInteraction:
+            capture = FakeCapture()
+
+            def force_activate(self):
+                calls.append("force_activate")
+
+            def drag_foreground(self, start, end, duration):
+                calls.append(("drag_foreground", start, end, duration))
+
+        class PVPTaskForTest(PVPTask):
+            @property
+            def executor(self):
+                return SimpleNamespace(interaction=FakeInteraction())
+
+        task = object.__new__(PVPTaskForTest)
+        task.operate = lambda func, block=True, restore_cursor=True: (
+            calls.append(("operate", block, restore_cursor)) or func()
+        )
+        task.sleep = lambda seconds: calls.append(("sleep", seconds))
+
+        PVPTask.drag_client(task, (10, 20), (30, 40), duration=0.4, after_sleep=0.5)
+
+        self.assertEqual(
+            [
+                ("operate", True, True),
+                "force_activate",
+                ("drag_foreground", (110, 220), (130, 240), 0.4),
+                ("sleep", 0.5),
+            ],
+            calls,
+        )
+
+    def test_scroll_client_delegates_cursor_positioning_to_adapter(self):
+        """P8：滚轮前的绝对光标定位走适配器的 set_foreground_cursor。"""
+
+        calls = []
+
+        class FakeCapture:
+            def get_abs_cords(self, x, y):
+                return (x + 1, y + 2)
+
+        class FakeInteraction:
+            capture = FakeCapture()
+
+            def try_activate(self):
+                calls.append("try_activate")
+
+            def set_foreground_cursor(self, point):
+                calls.append(("set_foreground_cursor", point))
+
+            def scroll(self, x, y, amount):
+                calls.append(("scroll", x, y, amount))
+
+        task = object.__new__(PVPTask)
+        task._executor = SimpleNamespace(interaction=FakeInteraction())
+        task.capture_frame = lambda: np.zeros((1080, 1920, 3), dtype=np.uint8)
+        task.operate = lambda func, block=True, restore_cursor=True: (
+            calls.append(("operate", block, restore_cursor)) or func()
+        )
+        task.sleep = lambda seconds: calls.append(("sleep", seconds))
+
+        PVPTask.scroll_client(
+            task,
+            (0.5, 0.5),
+            1,
+            count=2,
+            interval=0.1,
+            after_sleep=0.25,
+        )
+
+        self.assertEqual(
+            [
+                ("operate", True, True),
+                "try_activate",
+                ("set_foreground_cursor", (961, 542)),
+                # 两次滚轮之间的间隔是 time.sleep（不经 self.sleep），保持原样
+                ("scroll", 960, 540, 1),
+                ("scroll", 960, 540, 1),
+                ("sleep", 0.25),
+            ],
+            calls,
+        )
+
     def test_start_auto_battle_clicks_start_without_start_ocr_gate(self):
         task = object.__new__(PVPTask)
         task.config = {}
