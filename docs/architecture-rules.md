@@ -1,4 +1,4 @@
-# 架构守卫规则（R1-R6）
+# 架构守卫规则（R1-R7）
 
 > P6「架构守卫」的规则来源与例外台账。执行者是 `tests/test_architecture_layers.py`：它用
 > `ast` 解析 `src/` 的真实 import（`Import` / `ImportFrom` / 相对导入）与 while 守卫，
@@ -12,6 +12,7 @@
 ```text
 表达层   src/ui
 任务层   src/tasks（含领域包 src/tasks/map_trade）
+端口层   src/ports（纯抽象：只放 Protocol 契约）
 驱动层   src/utils、src/interaction、src/scene
 ```
 
@@ -20,6 +21,8 @@
 ```text
 src/ui              → src/tasks
 src/tasks           → src/utils / src/interaction / src/scene
+src/tasks           → src/ports
+src/utils           → src/ports
 src/tasks/map_trade → src/tasks/map_trade / src/utils
 ```
 
@@ -30,6 +33,7 @@ src/utils / src/interaction / src/scene → src/tasks / src/ui      （R2）
 src/ui                                  → src/utils / src/interaction / src/scene（R1）
 src/tasks/task_vision_mixin             → src/tasks/map_trade     （R4）
 非 map_trade 领域任务                    → src.tasks.map_trade.models（R3）
+src/ports                               → 包外的任何 src.*        （R7）
 基础工具                                 → 组合工具（含环）（R5）
 任何 src/**                              → `while monotonic() <= end_at` 形态（R6）
 ```
@@ -44,6 +48,7 @@ src/tasks/task_vision_mixin             → src/tasks/map_trade     （R4）
 | R4 | 公共视觉基座隔离领域 | `src/tasks/task_vision_mixin.py` → `src.tasks.map_trade` | `test_r4_task_vision_mixin_does_not_import_map_trade` |
 | R5 | 工具层 DAG（方向 + 无环） | 基础工具 → 组合工具；`src/utils` 内部 import 环 | `test_r5_basic_tools_do_not_import_composed_tools`、`test_r5_tool_layer_has_no_import_cycle` |
 | R6 | 统一有界轮询契约 | 比较 `monotonic()` 与截止时间的 while 守卫 | `test_r6_no_unregistered_monotonic_deadline_while_guards` |
+| R7 | 抽象层独立性（端口层不依赖实现） | `src/ports` → 包外 `src.*` | `test_r7_ports_layer_does_not_import_other_src_modules` |
 
 ## 3. 逐条细则
 
@@ -121,6 +126,22 @@ src/tasks/task_vision_mixin             → src/tasks/map_trade     （R4）
   - `while True:` + 收尾判断用纯 `deadline.expired()`。
   - `clock` 由调用方传入本模块的 `monotonic`，保留 `patch("<task module>.monotonic")` 时间夹具。
 - 现状：2 处命中，均为已登记的合法写法（见 EXCEPTIONS）。
+
+### R7 抽象层独立性
+
+`src/ports/**` 不得 import 包外的任何 `src.*` 模块；包内相对导入（解析为 `src.ports.*`）允许。
+
+- 判定：文件路径位于 `src/ports/`，且命中模块以 `src.` 开头但不是 `src.ports` 及其子模块。
+- 理由：端口是业务层（`src/tasks`）与适配器 / 工具层（`src/utils`）共同依赖的契约层，只能放在
+  中性层。放在 `src/tasks` 会逼出 `src/utils` 侧的镜像定义（R2 禁止 utils → tasks）；
+  放在 `src/utils` 方向则反过来。R7 保证端口层永远只是抽象契约，不会顺手依赖具体实现。
+- 运行时纯度：`src/ports` 运行时只 import stdlib（`typing` / `collections.abc`）；第三方类型库
+  （`numpy`）只允许写在 `if TYPE_CHECKING:` 内用于标注，由
+  `tests/test_ports.py::test_ports_package_is_a_stdlib_only_abstraction_layer` 用 AST 锁定。
+- 与 R2 的关系：R2 仍然禁止 `src/utils → src/tasks` / `src/ui`。`src/ports` 不在 tasks/ui 内，
+  所以 `src/utils → src/ports` 是合法方向（`src/utils/vision_runtime.py` 就这样引用
+  `TaskSurface`），不会再触发 R2。
+- 现状：0 违规。
 
 ## 4. 已知例外 EXCEPTIONS
 
@@ -204,10 +225,23 @@ R6 的“语句”一栏是守卫本身，附所属函数，例如：
 - 扫描规模：`src/**` 104 个 `.py`，其中 94 个含 import。
 - 规则扫描结果（P1 合并后复跑）：R1 = 0、R2 = 0、R3 = 0、R4 = 0、R5 方向 = 0、R5 环 = 0；R6 = 2（在册例外）。
 
+P3 端口收口复跑（2026-10-12，`refactor/ports`，`main` 已含 P4 / P5）：
+
+- `uv run ruff check .`：通过。
+- `uv run python -m unittest discover -s tests -p "test_*.py"`：1093 项全过（含本守卫 18 项）。
+- 规则扫描结果：R1 = 0、R2 = 0、R3 = 0、R4 = 0、R5 方向 = 0、R5 环 = 0；R6 = 2（在册例外）；
+  R7 = 0（`src/ports` 无包外 `src.*` 依赖）。
+- 真实反向验证：临时在 `src/ports/__init__.py` 注入 `from src.utils import polling`，R7 报出
+  「规则编号 + 文件 + 语句」（`src/ports/__init__.py:217: from src.utils import polling`，
+  命中 `src.utils`）；撤销后复跑全绿。
+- 端口层独立性：AST 扫 `src/ports/__init__.py` 只有 `__future__` / `collections.abc` / `typing`
+  与 `if TYPE_CHECKING:` 内的 `numpy`，运行时依赖仅 stdlib。
+
 ## 8. 边界：本守卫不检查什么
 
-- 不检查 `src/tasks → src/config` 等 refactor-plan 第 4 节列出但未编号为 R1-R6 的方向。
+- 不检查 `src/tasks → src/config` 等 refactor-plan 第 4 节列出但未编号为 R1-R7 的方向。
 - 不检查 `src/compat`、`src/diagnostics`、`src/globals.py` 等未列层的依赖方向。
 - 不检查运行时动态导入（`importlib`、`__import__`、字符串导入）。
 - 不检查 `tests/`、`scripts/`、`main.py` 的依赖方向。
+- R7 只约束 `src/ports` 自身；它不为其它层新增任何方向限制。
 - 方向规则对所有 import 生效（含函数内/延迟导入）；R5b 环检测同样包含延迟导入。

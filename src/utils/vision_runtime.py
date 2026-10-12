@@ -5,6 +5,11 @@ infrastructure: several non domain tasks and ``task_vision_mixin`` drive it
 through the duck typed task surface (``capture_frame`` / ``ocr`` /
 ``operate_click`` / ``config``).  ``map_trade`` keeps re-exporting it from the
 old module path for its own imports.
+
+The task surface it consumes is declared by the ``TaskSurface`` port of the
+neutral ``src/ports`` layer: a driver layer module may import that layer (R2 only
+forbids ``src/utils`` -> ``src/tasks`` / ``src/ui``), so the port has exactly one
+definition and this module keeps no local mirror.
 """
 
 from __future__ import annotations
@@ -20,6 +25,7 @@ from typing import Iterable
 import cv2
 import numpy as np
 
+from src.ports import TaskSurface
 from src.utils import task_vision
 from src.utils.calibration import HD_720
 from src.utils.image_utils import (
@@ -90,8 +96,8 @@ def parse_used_limit(text: str) -> tuple[int, int] | None:
 
 
 class Vision:
-    def __init__(self, task) -> None:
-        self.task = task
+    def __init__(self, task: TaskSurface) -> None:
+        self.task: TaskSurface = task
         self._templates: dict[str, tuple[np.ndarray, np.ndarray | None]] = {}
         self._last_frame_geometry: FrameGeometry | None = None
         self._last_candidate_evidence: dict[str, tuple[MatchCandidateEvidence, ...]] = {}
