@@ -1,10 +1,10 @@
 from qfluentwidgets import FluentIcon
 
 from src.tasks.BaseBD2Task import BaseBD2Task
-from src.tasks.map_trade.models import TemplateSpec
 from src.tasks.quick_hunt import QuickHuntConfigMixin
 from src.tasks.task_vision_mixin import TaskVisionMixin
 from src.utils.home_confirmation import HOME_DIMMED_P95_THRESHOLD_DEFAULT
+from src.utils.vision_models import TemplateSpec
 
 GUILD_TEMPLATE = TemplateSpec(
     name="guild",

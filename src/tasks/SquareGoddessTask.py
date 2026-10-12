@@ -8,7 +8,6 @@ import numpy as np
 from qfluentwidgets import FluentIcon
 
 from src.tasks.BaseBD2Task import BaseBD2Task
-from src.tasks.map_trade.models import MatchResult, TemplateSpec
 from src.utils import task_vision
 from src.utils.calibration import FHD_1080, HD_720, QHD_1440
 from src.utils.cartridge_quick_switch import (
@@ -39,6 +38,7 @@ from src.utils.image_utils import (
 )
 from src.utils.ocr_utils import normalize_ocr_text
 from src.utils.polling import PollDeadline
+from src.utils.vision_models import MatchResult, TemplateSpec
 
 REFERENCE_WIDTH = FHD_1080.width
 REFERENCE_HEIGHT = FHD_1080.height
