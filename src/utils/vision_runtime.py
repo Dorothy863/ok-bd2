@@ -6,27 +6,26 @@ through the duck typed task surface (``capture_frame`` / ``ocr`` /
 ``operate_click`` / ``config``).  ``map_trade`` keeps re-exporting it from the
 old module path for its own imports.
 
-The task surface it consumes is declared as the ``VisionTaskPort`` protocol
-below: the canonical ports live in ``src/tasks/ports.py``, but architecture rule
-R2 forbids ``src/utils`` importing ``src/tasks``, so this module declares the
-subset it really calls.  ``tests/test_ports.py`` asserts that subset relation so
-the two declarations cannot drift apart.
+The task surface it consumes is declared by the ``TaskSurface`` port of the
+neutral ``src/ports`` layer: a driver layer module may import that layer (R2 only
+forbids ``src/utils`` -> ``src/tasks`` / ``src/ui``), so the port has exactly one
+definition and this module keeps no local mirror.
 """
 
 from __future__ import annotations
 
 import re
-from collections.abc import Mapping
 from dataclasses import replace
 from math import ceil
 from pathlib import Path
 from time import monotonic
 from types import SimpleNamespace
-from typing import Any, Iterable, Protocol, runtime_checkable
+from typing import Iterable
 
 import cv2
 import numpy as np
 
+from src.ports import TaskSurface
 from src.utils import task_vision
 from src.utils.calibration import HD_720
 from src.utils.image_utils import (
@@ -96,63 +95,9 @@ def parse_used_limit(text: str) -> tuple[int, int] | None:
     return used, limit
 
 
-@runtime_checkable
-class VisionTaskPort(Protocol):
-    """``Vision`` 真实调用的任务面（本模块的最小端口）。
-
-    协议只描述被调用面，不代表接口稳定承诺。正式端口契约在 ``src/tasks/ports.py``
-    的 ``TaskSurface``；架构守卫 R2 禁止 ``src/utils`` import ``src/tasks``，
-    所以这里按「调用方自有接口」声明 vision_runtime 自己的调用面，
-    ``tests/test_ports.py`` 断言它是 ``TaskSurface`` 的成员子集，避免两处定义漂移。
-    端口迁到中性层（例如 ``src/ports.py``）后，本协议应删除并改为直接引用
-    ``TaskSurface``。
-    """
-
-    def capture_frame(self) -> np.ndarray:
-        """返回一帧客户端画面（BGR ``ndarray``）。"""
-        ...
-
-    def ocr(
-        self,
-        *,
-        frame: np.ndarray,
-        threshold: float = 0,
-        target_height: int = 0,
-        log: bool = False,
-        name: str | None = None,
-    ) -> list[Any]:
-        """对给定帧做 OCR，返回文字框列表。"""
-        ...
-
-    def operate_click(self, x: float, y: float, *, after_sleep: float = 0.0) -> Any:
-        """按相对坐标点击。"""
-        ...
-
-    def drag_client(
-        self,
-        start: tuple[int, int],
-        end: tuple[int, int],
-        *,
-        duration: float = 0.7,
-        after_sleep: float = 0.0,
-    ) -> None:
-        """在客户端坐标上从 ``start`` 拖到 ``end``。"""
-        ...
-
-    config: Mapping[str, Any]
-
-    def info_set(self, key: str, value: Any) -> None:
-        """写入一条任务状态。"""
-        ...
-
-    def sleep(self, timeout: float) -> Any:
-        """等待 ``timeout`` 秒。"""
-        ...
-
-
 class Vision:
-    def __init__(self, task: VisionTaskPort) -> None:
-        self.task: VisionTaskPort = task
+    def __init__(self, task: TaskSurface) -> None:
+        self.task: TaskSurface = task
         self._templates: dict[str, tuple[np.ndarray, np.ndarray | None]] = {}
         self._last_frame_geometry: FrameGeometry | None = None
         self._last_candidate_evidence: dict[str, tuple[MatchCandidateEvidence, ...]] = {}

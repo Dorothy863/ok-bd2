@@ -9,7 +9,7 @@ from typing import Protocol, runtime_checkable
 import cv2
 import numpy as np
 
-from src.tasks.ports import TaskSurface
+from src.ports import TaskSurface
 from src.utils import task_vision
 from src.utils.calibration import FHD_1080
 from src.utils.home_confirmation import (
@@ -48,11 +48,11 @@ LOADING_TEMPLATE = TemplateSpec(
 class HomeReturnHost(TaskSurface, Protocol):
     """``TaskVisionMixin`` 宿主在端口之外还提供的主页业务方法。
 
-    协议只描述被调用面，不代表接口稳定承诺。这两个方法不是驱动端口，而是 ``BaseBD2Task`` 的业务面
-    （``src/tasks/BaseBD2Task.py:312`` / ``:651``）；``_wait_for_home_confirmation`` 与
-    ``_auto_return_home_after_timeout`` 会调用它们，所以那两个方法的 ``self`` 标注为
-    本协议而不是 ``TaskSurface``，避免类型标注说谎。P4 拆出页面业务后应改为
-    「页面识别 + InputPort」。
+    协议只描述被调用面，不代表接口稳定承诺。这两个方法不是驱动端口，而是宿主业务面
+    （``src/tasks/cartridge_home_mixin.py:66`` / ``:247``，P4 从 ``BaseBD2Task`` 拆出）；
+    ``_wait_for_home_confirmation`` 与 ``_auto_return_home_after_timeout`` 会调用它们，
+    所以那两个方法的 ``self`` 标注为本协议而不是 ``TaskSurface``：只放驱动端口的
+    ``src/ports`` 不该收业务方法；P4 拆出页面业务后应改为「页面识别 + InputPort」。
     """
 
     def attempt_return_home(self, name: str = "自动返回主页") -> bool:

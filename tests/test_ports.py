@@ -1,23 +1,29 @@
 """端口契约测试（P3）：协议必须对得上真实任务类，且不能是空协议。
 
+端口只有一份定义，位于中性层 ``src/ports``（业务层与工具层都引用它），所以这里同时锁住：
+
 - 结构校验：``BaseBD2Task`` 与真实任务子类通过 ``isinstance``（``runtime_checkable``）
   满足各端口，覆盖组合面 ``TaskSurface``。
-- 防漂移：协议声明的成员名与关键字参数必须在真实类上存在；如果协议成员在真实类上
-  不存在，就改协议而不是放宽测试。
+- 防漂移：协议成员在真实类上必须存在，且**消费面不超过契约面**（``Vision`` 只读
+  ``TaskSurface`` 成员；``TaskVisionMixin`` 通过 ``self`` 访问的宿主成员都在
+  ``HomeReturnHost`` 里）。
+- 抽象层纯度：``src/ports`` 运行时只依赖 stdlib（守卫 R7 负责「不得 import 包外 src.*」）。
 - 反向验证：普通对象、只实现单个端口的桩都不满足 ``TaskSurface``，证明协议不是空壳。
 """
 
 from __future__ import annotations
 
+import ast
 import inspect
+import sys
 import unittest
+from pathlib import Path
 from typing import get_type_hints
 
 from ok import Box
 
-from src.tasks import ports
-from src.tasks.BaseBD2Task import BaseBD2Task
-from src.tasks.ports import (
+from src import ports
+from src.ports import (
     CapturePort,
     ConfigPort,
     InputPort,
@@ -27,14 +33,20 @@ from src.tasks.ports import (
     StatusPort,
     TaskSurface,
 )
+from src.tasks.BaseBD2Task import BaseBD2Task
 from src.tasks.SquareGoddessTask import SquareGoddessTask
 from src.tasks.task_vision_mixin import HomeReturnHost, TaskVisionMixin
-from src.utils.vision_runtime import Vision, VisionTaskPort
+from src.utils.vision_runtime import Vision
+
+ROOT = Path(__file__).resolve().parents[1]
+PORTS_PACKAGE_INIT = ROOT / "src" / "ports" / "__init__.py"
+VISION_RUNTIME = ROOT / "src" / "utils" / "vision_runtime.py"
+TASK_VISION_MIXIN = ROOT / "src" / "tasks" / "task_vision_mixin.py"
 
 # 单一端口（``TaskSurface`` 是它们的组合面；``OcrBox`` 是 ``ocr`` 的返回值面）。
 SINGLE_PORTS = (CapturePort, OcrPort, InputPort, ConfigPort, StatusPort, ProgressPort)
-# 任务对象应当结构满足的全部端口，含 vision_runtime 在 R2 约束下自带的子集端口。
-TASK_PORTS = (*SINGLE_PORTS, TaskSurface, VisionTaskPort)
+# 任务对象应当结构满足的全部端口。
+TASK_PORTS = (*SINGLE_PORTS, TaskSurface)
 # 必须能通过 ``isinstance`` 结构校验的协议（含宿主业务面与 OCR 结果框）。
 ALL_PROTOCOLS = (*TASK_PORTS, HomeReturnHost, OcrBox)
 
@@ -60,6 +72,42 @@ def _task_instance(task_class: type):
     task = object.__new__(task_class)
     task.config = {}
     return task
+
+
+def _attribute_reads(path: Path, expression: str) -> set[str]:
+    """收集 ``<expression>.<name>`` 形式的属性读取名（AST，含函数体）。"""
+
+    tree = ast.parse(path.read_text(encoding="utf-8"))
+    return {
+        node.attr
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Attribute) and ast.unparse(node.value) == expression
+    }
+
+
+def _is_type_checking_test(test: ast.expr) -> bool:
+    return (isinstance(test, ast.Name) and test.id == "TYPE_CHECKING") or (
+        isinstance(test, ast.Attribute) and test.attr == "TYPE_CHECKING"
+    )
+
+
+def _runtime_import_targets(path: Path) -> set[str]:
+    """收集模块运行时真正会执行的 import 目标（跳过 ``if TYPE_CHECKING:`` 分支）。"""
+
+    targets: set[str] = set()
+
+    def visit(node: ast.AST) -> None:
+        for child in ast.iter_child_nodes(node):
+            if isinstance(child, ast.If) and _is_type_checking_test(child.test):
+                continue
+            if isinstance(child, ast.Import):
+                targets.update(alias.name for alias in child.names)
+            elif isinstance(child, ast.ImportFrom) and child.module:
+                targets.add(child.module)
+            visit(child)
+
+    visit(ast.parse(path.read_text(encoding="utf-8")))
+    return targets
 
 
 class _CaptureOnlyStub:
@@ -160,13 +208,12 @@ class PortsContractTest(unittest.TestCase):
         self.assertIsInstance(capture_only, CapturePort)
         self.assertNotIsInstance(capture_only, TaskSurface)
         self.assertIsInstance(_FullTaskSurfaceStub(), TaskSurface)
-        self.assertIsInstance(_CaptureOnlyStub(), CapturePort)
 
     def test_ports_document_that_they_are_call_surface_only(self) -> None:
         """契约说明必须写明「只描述被调用面，不代表接口稳定承诺」。"""
 
         self.assertIn("不代表接口稳定承诺", ports.__doc__ or "")
-        for protocol in (TaskSurface, VisionTaskPort, HomeReturnHost):
+        for protocol in (TaskSurface, HomeReturnHost):
             with self.subTest(protocol=protocol.__name__):
                 self.assertIn("不代表接口稳定承诺", protocol.__doc__ or "")
 
@@ -175,11 +222,27 @@ class PortsContractTest(unittest.TestCase):
 
         self.assertIsInstance(Box(1, 2, 3, 4, name="示例"), OcrBox)
 
-    def test_vision_task_port_is_a_subset_of_task_surface(self) -> None:
-        """R2 禁止 ``src/utils`` import ``src/tasks``，vision_runtime 自带端口必须是子集。"""
+    def test_vision_consumes_only_task_surface_members(self) -> None:
+        """消费面 ≤ 契约面：``Vision`` 只读 ``self.task`` 的 ``TaskSurface`` 成员。"""
 
-        self.assertTrue(_members(VisionTaskPort))
-        self.assertTrue(_members(VisionTaskPort) <= _members(TaskSurface))
+        consumed = _attribute_reads(VISION_RUNTIME, "self.task")
+        self.assertTrue(consumed, "AST 未扫到 self.task 调用面，扫描可能已失效")
+        self.assertLessEqual(consumed, _members(TaskSurface))
+        self.assertEqual(
+            {"capture_frame", "config", "drag_client", "info_set", "ocr", "operate_click", "sleep"},
+            consumed,
+        )
+
+    def test_task_vision_mixin_self_calls_stay_inside_the_host_contract(self) -> None:
+        """mixin 通过 ``self`` 访问的非下划线宿主成员必须都在 ``HomeReturnHost`` 里。"""
+
+        accessed = {
+            name
+            for name in _attribute_reads(TASK_VISION_MIXIN, "self")
+            if not name.startswith("_")
+        }
+        self.assertTrue(accessed, "AST 未扫到 self 调用面，扫描可能已失效")
+        self.assertLessEqual(accessed, _members(HomeReturnHost))
 
     def test_home_return_host_adds_only_real_host_methods(self) -> None:
         """``HomeReturnHost`` 只在端口之上补真实存在的主页业务方法。"""
@@ -195,10 +258,20 @@ class PortsContractTest(unittest.TestCase):
                 self.assertTrue(hasattr(task, member), f"{member} 在 BaseBD2Task 上不存在")
         self.assertIsInstance(task, HomeReturnHost)
 
+    def test_ports_package_is_a_stdlib_only_abstraction_layer(self) -> None:
+        """``src/ports`` 运行时只 import stdlib；第三方类型库只允许出现在 TYPE_CHECKING 内。"""
+
+        runtime_targets = _runtime_import_targets(PORTS_PACKAGE_INIT)
+        self.assertTrue(runtime_targets, "AST 未扫到 import，扫描可能已失效")
+        roots = {target.split(".")[0] for target in runtime_targets}
+        non_stdlib = sorted(root for root in roots if root not in sys.stdlib_module_names)
+        self.assertEqual([], non_stdlib, f"src/ports 运行时引入了非 stdlib 依赖：{non_stdlib}")
+        self.assertNotIn("numpy", roots)
+
     def test_vision_and_mixin_declare_the_port_on_duck_typed_positions(self) -> None:
         """鸭子类型位置必须标注到端口，而不是继续留在无标注状态。"""
 
-        self.assertIs(get_type_hints(Vision.__init__)["task"], VisionTaskPort)
+        self.assertIs(get_type_hints(Vision.__init__)["task"], TaskSurface)
 
         expected_self_annotations = {
             "_quick_vision": TaskSurface,
