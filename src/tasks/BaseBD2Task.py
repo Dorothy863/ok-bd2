@@ -14,6 +14,7 @@ from PIL import Image
 
 from src.scene.BD2Scene import BD2Scene
 from src.scene.ScreenPosition import ScreenPosition
+from src.tasks.page_recognition import PageId, PageRecognition, identify_page
 from src.tasks.task_notifications import log_task_completion
 from src.utils.home_confirmation import (
     HOME_ANNOUNCEMENT_CLEAR_RELATIVE_POINT,
@@ -333,8 +334,9 @@ class BaseBD2Task(BaseTask):
     def auto_return_main_home(self, max_steps: int | None = None) -> bool:
         """自动返回主页面。
 
-        每步：截图 → 若已是主页直接成功；否则优先点右上角“H/房子”；
-        无 H 时用 ROI+模板匹配点左上角返回键（仅非主页时执行，主页上它是“返回战场”）。
+        每步：截图 → ``identify_page`` 识别页面，再按识别结果决策：
+        已是主页直接成功；识别到右上角 H/房子提示时点房子；识别到抽卡详情层时点 X 关闭；
+        其余用 ROI+模板匹配点左上角返回键（仅非主页时执行，主页上它是“返回战场”）。
         有界循环直到主页或步数用尽。
         """
         step_limit = (
@@ -350,12 +352,12 @@ class BaseBD2Task(BaseTask):
                 self.log_warning(f"自动返回主页：截图失败：{exc}")
                 return False
 
-            is_home, has_house_hint = self._home_scan(frame)
-            if is_home:
+            recognition = self._recognize_page(frame)
+            if recognition.page is PageId.HOME:
                 self.info_set("自动返回主页", f"已是主页（第{step}步）")
                 return True
 
-            if has_house_hint:
+            if recognition.has_house_hint:
                 self.log_info(
                     f"自动返回主页：第 {step} 步检测到右上角 H，点房子回主页。"
                 )
@@ -380,11 +382,8 @@ class BaseBD2Task(BaseTask):
         self.log_warning(f"自动返回主页：{step_limit} 步内未回到主页。")
         return False
 
-    def _home_scan(self, frame) -> tuple[bool, bool]:
-        """OCR 判定：是否主页（含“抽抽乐”）、右上角是否有 H/房子提示。"""
-        frame_h, frame_w = frame.shape[:2]
-        is_home = False
-        has_house_hint = False
+    def _recognize_page(self, frame) -> PageRecognition:
+        """用该帧 OCR 结果识别页面；OCR 失败等价于旧实现的“信号均未命中”。"""
         try:
             boxes = list(
                 self.ocr(
@@ -395,24 +394,11 @@ class BaseBD2Task(BaseTask):
                 )
             )
         except Exception:
-            return is_home, has_house_hint
-        for box in boxes:
-            name = str(getattr(box, "name", "") or "")
-            normalized_name = normalize_ocr_text(name).strip()
-            if normalized_name == "抽抽乐":
-                is_home = True
-            if normalized_name == "H":
-                try:
-                    x, y, w, h = int(box.x), int(box.y), int(box.width), int(box.height)
-                except Exception:
-                    continue
-                cx, cy = x + w // 2, y + h // 2
-                if cx / frame_w > 0.7 and cy / frame_h < 0.25:
-                    has_house_hint = True
-        return is_home, has_house_hint
+            return identify_page(frame, [])
+        return identify_page(frame, boxes)
 
     def _click_gacha_detail_close(self, frame, step: int) -> bool:
-        """Close the gacha character-detail layer by its OCR X button."""
+        """识别抽卡角色详情层，并在识别到的 X 中心点击关闭。"""
         try:
             boxes = list(
                 self.ocr(
@@ -425,45 +411,24 @@ class BaseBD2Task(BaseTask):
         except Exception:
             return False
 
-        names = [str(getattr(box, "name", "") or "") for box in boxes]
-        joined = " ".join(names)
-        required = ("抽抽乐点数", "抽1次", "抽10次")
-        if not all(keyword in joined for keyword in required):
+        recognition = identify_page(frame, boxes)
+        close_center = recognition.detail_close_center
+        if recognition.page is not PageId.GACHA_DETAIL or close_center is None:
             return False
 
+        center_x, center_y = close_center
         frame_h, frame_w = frame.shape[:2]
-        for box in boxes:
-            name = str(getattr(box, "name", "") or "").strip().upper()
-            if name not in {"X", "×", "✕"}:
-                continue
-            try:
-                x, y, width, height = (
-                    int(box.x),
-                    int(box.y),
-                    int(box.width),
-                    int(box.height),
-                )
-            except Exception:
-                continue
-            center_x = x + width // 2
-            center_y = y + height // 2
-            if not (
-                0.45 * frame_w <= center_x <= 0.95 * frame_w
-                and 0.10 * frame_h <= center_y <= 0.65 * frame_h
-            ):
-                continue
-            self.log_info(
-                f"自动返回主页：第 {step} 步识别到抽卡详情页，点击关闭 X @"
-                f"({center_x},{center_y})。"
-            )
-            self.operate_click(
-                center_x / frame_w,
-                center_y / frame_h,
-                name="自动返回主页-抽卡详情关闭",
-                after_sleep=0.0,
-            )
-            return True
-        return False
+        self.log_info(
+            f"自动返回主页：第 {step} 步识别到抽卡详情页，点击关闭 X @"
+            f"({center_x},{center_y})。"
+        )
+        self.operate_click(
+            center_x / frame_w,
+            center_y / frame_h,
+            name="自动返回主页-抽卡详情关闭",
+            after_sleep=0.0,
+        )
+        return True
 
     def _click_top_left_back(self, frame, step: int) -> bool:
         """在左上角 ROI 内用模板匹配“返回”条，命中则点其中心。"""
