@@ -686,3 +686,22 @@ P7 实机验收新增工具 `scripts/verify_auto_return.py`（`identify` / `retu
 - `src/tasks/BaseBD2Task.py`（219 行）：状态输出（`info_*` / `task_info_snapshot`）、
   生命周期、初始化，继承两个 mixin。
 - `src/ports/__init__.py`：端口契约（`TaskSurface` 等），被 `src/tasks` 与 `src/utils` 共同引用。
+
+### 7.8 P7 阻塞期间的主 Agent 审计（2026-10-12）
+
+实机验收需客户端在跑，阻塞期间主 Agent 对计划交付项逐条对账，发现两处实质问题：
+
+1. **输入适配器旁路**（已派发 P8）：`src/tasks/device_ops_mixin.py` 的 `drag_client`
+   与 `scroll_client` 直接 `import win32api/win32con` 并手搝 `SetCursorPos` /
+   `mouse_event`，绕过 `src/interaction/BD2Interaction.py` 的输入适配器与 `_input_lock`。
+   计划第 2 节的适配器层（`BD2Interaction 输入`）因此没有真正落地。
+2. **主页判定仍是两套语义**（记录，不擅自改）：
+   - `page_recognition`（自动返回、全帧）为精确等值；
+   - `utils/home_confirmation`（日常等任务的三信号门禁、固定小 ROI）为子串容错，
+     实测 `home_gacha_ocr_matches("抽抽乐点数") is True`。
+   两者用途不同、严格度不同，且 R2 禁止 `utils → tasks`，强行合并会造成策略倒置；
+   作为可选清理项记录。
+
+另：右上角「H/房子」分支经实测为**死代码**（`normalize_ocr_text("H") == "h"` 却与
+字面量 `"H"` 比较），实际回主页依赖左上角返回 ROI 模板匹配。是否启用该分支需用户决策
+并配套实机验证。

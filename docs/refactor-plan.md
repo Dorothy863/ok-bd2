@@ -375,16 +375,39 @@ uv run python -m unittest discover -s tests -p "test_*.py"
 
 合并后 `main` 实测：`src/**` 106 个文件；R1/R2/R3/R4/R5 = 0 违规；R6 仅 2 条在册例外（语义正确）。
 
-### 8.2 待办（P3/P4/P5 与验收）
+### 8.2 待办与验收（P7）
 
 | 项 | 内容 | 阻塞 |
 | --- | --- | --- |
 | P7 实机验收 | 主页识别 / 抽卡详情关闭返回主页 / 一键日常逐模块「执行前自动返回主页」开关 | 需要游戏客户端在跑且用户在场；已备好 `scripts/verify_auto_return.py` |
 | P3 端口抽象 | **已完成**：`src/ports/` 唯一定义 + R7 守卫（`src/ports` 不得依赖包外 `src.*`） | 无 |
+| P8 输入适配器收口 | **进行中**（`refactor/input-adapter`）：`drag_client` / `scroll_client` 直调 `win32api` 属适配器旁路，收口进 `BD2Interaction` + 新增守卫 R8 | 无（结构搬迁） |
 | P4 `BaseBD2Task` 拆分 | **已完成**：`device_ops_mixin`（设备操作）+ `cartridge_home_mixin`（卡带/主页业务），基类只留状态输出与生命周期 | 无 |
 | P5 表达层收敛 | 核查结论：**已达成**，UI 只经 `task_info_snapshot` 读状态（见 P5 小节实测）；不新增抽象 | 无 |
 
-### 8.3 本轮发现、需用户决策的问题
+### 8.3 审计发现与决策记录
+
+**已决策（本轮主 Agent 实测结论）**
+
+1. **主页标签存在三处定义，两套匹配语义——有意保留，不强行统一**
+   - `src/tasks/page_recognition.py::HOME_GACHA_LABEL`：全帧 OCR 标签的**精确等值**判定（供 `identify_page` 用）。
+   - `src/utils/home_confirmation.py::HOME_GACHA_OCR_KEYWORD`：固定小 ROI（gacha 入口）的**子串容错**判定（供三信号门禁用）。
+   - `src/tasks/FreeGachaTask.py:502` 内联了一次 `抽抽乐` 字面量（点击入口用）。
+   - 理由：两者是**不同用途、不同严格度**的策略（全帧分类要求精确，小 ROI 容错是为了 OCR 只识别部分文字的实测情况）；且守卫 R2 禁止 `src/utils → src/tasks`，唯一定义只能放 utils。
+   - 结论：不在本轮强行合并（会产生跨层策略倒置）；作为可选清理项记录：把字面量统一到 `src/utils/home_confirmation.py`，`page_recognition` 只引用字面量、保留自己的精确比较。
+2. **输入适配器旁路**：已由 P8 派发收口（见 8.2）。
+
+**需用户决策（有实测证据，改动涉及实机行为）**
+
+1. **右上角「H/房子」分支是死代码**
+   - 证据：`normalize_ocr_text("H") == "h"`，而 `page_recognition.HOUSE_HINT_LABEL == "H"` 且判定为严格等值 → 实测 `normalize_ocr_text("H") == HOUSE_HINT_LABEL` 为 `False`。
+   - 影响：该分支从未命中；实际回主页靠「左上角返回 ROI 模板匹配」兜住（这正是你现在能正常回主页的原因）。
+   - 两个选项：① 保持现状（不改行为，继续走左上角返回）；② 改为大小写无关比较，启用这条从未在实机验证过的点房子分支——**必须**配套实机验证。
+2. **共享主页门禁仍是子串匹配**
+   - 证据：`home_confirmation.home_gacha_ocr_matches("抽抽乐点数")` 返回 `True`。
+   - 影响：`_wait_for_home_confirmation` 路径（日常/小屋/快速狩猎/广场女神像/map_trade）在固定小 ROI 上接受“包含抽抽乐”的文本；理论上抽卡详情/券详情页若在该 ROI 出现同类文本，会误判为主页。
+   - 风险：改成精确匹配会让门禁**变严**，可能使现在能跑通的日常任务在实机上失败（例如 OCR 返回 “抽抽乐·” 这类多余字符）。属于游戏业务判定，**不在本重构范围内擅自修改**，需你决定 + 实机验证。
+
 
 1. **右上角「H/房子」分支实机不可达（历史语义，非本轮引入）**：
    `normalize_ocr_text()` 会把标签小写化，而旧代码与字面量 `"H"` 严格比较，恒为 False。
