@@ -40,7 +40,9 @@ ROOT = Path(__file__).resolve().parents[1]
 
 class SaveFrameTest(unittest.TestCase):
     def test_save_frame_preserves_bgr_bgra_and_grayscale_channels(self):
-        from src.tasks import BaseBD2Task as base_task_module
+        # P4：``save_frame`` 与 ``PROBE_OUTPUT_DIR`` 搬到 device_ops_mixin，
+        # patch 目标跟随常量定义模块。
+        from src.tasks import device_ops_mixin
 
         task = object.__new__(BaseBD2Task)
         task.info_set = lambda *_args: None
@@ -51,7 +53,7 @@ class SaveFrameTest(unittest.TestCase):
         )
 
         with tempfile.TemporaryDirectory() as directory:
-            with patch.object(base_task_module, "PROBE_OUTPUT_DIR", Path(directory)):
+            with patch.object(device_ops_mixin, "PROBE_OUTPUT_DIR", Path(directory)):
                 for index, frame in enumerate(frames):
                     with self.subTest(channels=frame.shape):
                         path = task.save_frame(f"channel_{index}", frame)

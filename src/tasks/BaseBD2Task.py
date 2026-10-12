@@ -1,3 +1,10 @@
+"""BaseBD2Task：状态输出、生命周期与多继承组合根。
+
+工具/设备操作见 :mod:`src.tasks.device_ops_mixin`；本模块保留 ``__init__``、
+``info_*`` 状态输出、任务生命周期、``task_info_snapshot`` 与卡带/主页业务方法
+（第二步搬出），既有的模块级导入点通过下面的兼容再导出保持可用。
+"""
+
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
@@ -9,11 +16,15 @@ from typing import Any, Callable
 
 import cv2
 import numpy as np
-from ok import BaseTask, Box, Logger, og
-from PIL import Image
+from ok import BaseTask, Logger, og
 
 from src.scene.BD2Scene import BD2Scene
 from src.scene.ScreenPosition import ScreenPosition
+from src.tasks.device_ops_mixin import (
+    GREEN_MASK_TOLERANCE,
+    PROBE_OUTPUT_DIR,
+    DeviceOpsMixin,
+)
 from src.tasks.page_recognition import PageId, PageRecognition, identify_page
 from src.tasks.task_notifications import log_task_completion
 from src.utils.home_confirmation import (
@@ -35,8 +46,6 @@ from src.utils.polling import PollDeadline
 from src.utils.template_resolution import offline_template_scale
 
 logger = Logger.get_logger(__name__)
-PROBE_OUTPUT_DIR = Path("probe_outputs")
-GREEN_MASK_TOLERANCE = 0
 CARTRIDGE_RECENT_ENTRY_POINT = (0.7875, 0.9111111111111111)
 RECENT_CARTRIDGE_SPECIAL_PAGE_SECONDS = 3.0
 RECENT_CARTRIDGE_SPECIAL_PAGE_MAX_ACTIONS = 3
@@ -51,6 +60,26 @@ TEMPLATE_DIR = PROJECT_ROOT / "recognition-assets" / "template-assets"
 # see ``BaseBD2Task._task_info_lock``.
 _INFO_FALLBACK_LOCK = threading.RLock()
 
+
+# 拆分前可导入的模块级名字继续保留（``__all__`` 同时声明再导出意图）。
+__all__ = [
+    "BEIJING_TIMEZONE",
+    "CARTRIDGE_RECENT_ENTRY_POINT",
+    "GREEN_MASK_TOLERANCE",
+    "PROBE_OUTPUT_DIR",
+    "PROJECT_ROOT",
+    "RECENT_CARTRIDGE_SPECIAL_PAGE_MAX_ACTIONS",
+    "RECENT_CARTRIDGE_SPECIAL_PAGE_SECONDS",
+    "RECENT_PVP_CARTRIDGE_PIXEL_THRESHOLD",
+    "RECENT_PVP_CARTRIDGE_TEMPLATE_FILE",
+    "RECENT_PVP_CARTRIDGE_TEMPLATE_THRESHOLD",
+    "RECENT_PVP_CARTRIDGE_ZNCC_THRESHOLD",
+    "TEMPLATE_DIR",
+    "BaseBD2Task",
+    "RecentPvpCartridgeMatch",
+    "green_mask_from_template",
+    "task_info_snapshot",
+]
 
 @dataclass(frozen=True)
 class RecentPvpCartridgeMatch:
@@ -69,7 +98,7 @@ class RecentPvpCartridgeMatch:
         )
 
 
-class BaseBD2Task(BaseTask):
+class BaseBD2Task(DeviceOpsMixin, BaseTask):
     DEFAULT_MOVE = False
 
     def __init__(self, *args, **kwargs):
@@ -175,139 +204,6 @@ class BaseBD2Task(BaseTask):
         if og.my_app is None:
             return None
         return og.my_app.submit_periodic_task(delay, task, *args, **kwargs)
-
-    @property
-    def main_viewport(self) -> Box:
-        return self.box_of_screen(0.05, 0.05, 0.95, 0.95, name="main_viewport")
-
-    @property
-    def capture_method_name(self) -> str:
-        capture_method = getattr(self.executor.device_manager, "capture_method", None)
-        return str(capture_method) if capture_method is not None else "<none>"
-
-    def capture_frame(self, screenshot_name: str | None = None):
-        frame = self.next_frame()
-        if frame is None:
-            raise RuntimeError("未能从 BD2 截取画面。")
-
-        height, width = frame.shape[:2]
-        self.info_set("截图方式", self.capture_method_name)
-        self.info_set("游戏分辨率", f"{width}x{height}")
-        if screenshot_name:
-            self.save_frame(screenshot_name, frame)
-        return frame
-
-    def save_frame(self, name: str, frame) -> Path:
-        PROBE_OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
-        output_path = PROBE_OUTPUT_DIR / f"{name}.png"
-        if frame.ndim == 2:
-            image = Image.fromarray(frame)
-        elif frame.ndim == 3 and frame.shape[2] == 4:
-            image = Image.fromarray(cv2.cvtColor(frame, cv2.COLOR_BGRA2RGBA))
-        elif frame.ndim == 3 and frame.shape[2] == 3:
-            image = Image.fromarray(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
-        else:
-            raise ValueError(f"Unsupported screenshot frame shape: {frame.shape}")
-        image.save(output_path)
-        self.info_set("截图文件", str(output_path))
-        return output_path
-
-    def ocr_frame(self, frame=None, threshold: float = 0.2, screenshot: bool = False):
-        frame = frame if frame is not None else self.capture_frame()
-        boxes = self.ocr(frame=frame, threshold=threshold, log=True, screenshot=screenshot)
-        texts = [box.name for box in boxes if getattr(box, "name", "")]
-        self.info_set("OCR 文本数量", len(texts))
-        self.info_set("OCR 文本", ", ".join(texts[:30]))
-        return boxes
-
-    def write_probe_text(
-        self,
-        name: str,
-        lines: list[str],
-        info_label: str = "OCR 文本文件",
-    ) -> Path:
-        PROBE_OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
-        output_path = PROBE_OUTPUT_DIR / name
-        output_path.write_text("\n".join(lines), encoding="utf-8")
-        self.info_set(info_label, str(output_path))
-        return output_path
-
-    @staticmethod
-    def green_mask(template: np.ndarray, tolerance: int = GREEN_MASK_TOLERANCE) -> np.ndarray:
-        return green_mask_from_template(template, tolerance=tolerance)
-
-    def find_one_green_mask(
-        self,
-        *args,
-        green_tolerance: int = GREEN_MASK_TOLERANCE,
-        match_method=cv2.TM_CCORR_NORMED,
-        **kwargs,
-    ):
-        kwargs["mask_function"] = lambda template: green_mask_from_template(
-            template,
-            tolerance=green_tolerance,
-        )
-        kwargs["match_method"] = match_method
-        return self.find_one(*args, **kwargs)
-
-    def find_green_mask_features(
-        self,
-        *args,
-        green_tolerance: int = GREEN_MASK_TOLERANCE,
-        match_method=cv2.TM_CCORR_NORMED,
-        **kwargs,
-    ):
-        kwargs["mask_function"] = lambda template: green_mask_from_template(
-            template,
-            tolerance=green_tolerance,
-        )
-        kwargs["match_method"] = match_method
-        return self.find_feature(*args, **kwargs)
-
-    def click(
-        self,
-        x: int | float | Box | list[Box] = -1,
-        y=-1,
-        move_back=None,
-        name=None,
-        interval=-1,
-        move=None,
-        down_time=0.02,
-        after_sleep=0,
-        key="left",
-        hcenter=False,
-        vcenter=False,
-        action_name=None,
-    ) -> Any:
-        if action_name is not None:
-            if not self._check_action_interval(action_name, interval):
-                return False
-            interval = -1
-
-        if move is None:
-            move = self.DEFAULT_MOVE
-        if move_back is None:
-            move_back = move
-
-        return super().click(
-            x,
-            y,
-            move_back=move_back,
-            name=name,
-            interval=interval,
-            move=move,
-            down_time=down_time,
-            after_sleep=after_sleep,
-            key=key,
-            hcenter=hcenter,
-            vcenter=vcenter,
-        )
-
-    def operate(self, func: Callable, block: bool = True, restore_cursor: bool = True):
-        interaction = getattr(self.executor, "interaction", None)
-        if interaction is not None and hasattr(interaction, "operate"):
-            return interaction.operate(func, block=block, restore_cursor=restore_cursor)
-        return func()
 
     def attempt_return_home(self, name: str = "自动返回主页") -> bool:
         """正式路径点击右上角“主页”按钮，把角色从子界面带回主页面。
@@ -489,164 +385,6 @@ class BaseBD2Task(BaseTask):
         except Exception as exc:
             self.log_warning(f"自动返回主页：左上角返回点击失败：{exc}")
             return False
-
-    def operate_click(
-        self,
-        x: int | float | Box | list[Box] = -1,
-        y=-1,
-        restore_cursor=True,
-        name=None,
-        interval=-1,
-        down_time=0.02,
-        after_sleep=0,
-        key="left",
-        hcenter=False,
-        vcenter=False,
-        action_name=None,
-    ) -> Any:
-        action_name = action_name or "operate_click"
-        if not self._check_action_interval(action_name, interval):
-            return False
-        try:
-            click_log = self._click_log_message(
-                x,
-                y,
-                int(self.width),
-                int(self.height),
-                str(name or action_name),
-            )
-        except Exception:
-            click_log = f"{name or action_name}: target={x!r},{y!r}"
-        interaction = getattr(self.executor, "interaction", None)
-        background_click = bool(
-            interaction is not None
-            and hasattr(interaction, "background_click_enabled")
-            and interaction.background_click_enabled()
-        )
-        result = self.operate(
-            lambda: self.click(
-                x,
-                y,
-                name=name,
-                interval=-1,
-                move=True,
-                down_time=down_time,
-                after_sleep=0,
-                key=key,
-                hcenter=hcenter,
-                vcenter=vcenter,
-            ),
-            block=not background_click,
-            restore_cursor=restore_cursor and not background_click,
-        )
-        self.info_set("鼠标点击", click_log)
-        self.sleep(after_sleep)
-        return result
-
-    @staticmethod
-    def _click_log_message(x, y, width: int, height: int, action_name: str) -> str:
-        if isinstance(x, (int, float)) and isinstance(y, (int, float)):
-            if 0 < x < 1 or 0 < y < 1:
-                client_x = int(width * x)
-                client_y = int(height * y)
-                return (
-                    f"{action_name}: client=({client_x},{client_y}), "
-                    f"relative=({float(x):.6f},{float(y):.6f})"
-                )
-            return f"{action_name}: client=({int(x)},{int(y)})"
-
-        if isinstance(x, Box):
-            return f"{action_name}: box={x.name or '-'} {x.box}"
-        if isinstance(x, list):
-            return f"{action_name}: boxes={len(x)}"
-        return f"{action_name}: target={x!r},{y!r}"
-
-    def drag_client(
-        self,
-        start: tuple[int, int],
-        end: tuple[int, int],
-        duration: float = 0.7,
-        after_sleep: float = 0.0,
-    ) -> None:
-        """Drag with foreground mouse input only; these tasks never send keys."""
-
-        def action():
-            import win32api
-            import win32con
-
-            interaction = getattr(self.executor, "interaction", None)
-            if interaction is not None and hasattr(interaction, "force_activate"):
-                interaction.force_activate()
-            elif interaction is not None and hasattr(interaction, "try_activate"):
-                interaction.try_activate()
-            capture = getattr(interaction, "capture", None)
-
-            def to_screen(point: tuple[int, int]) -> tuple[int, int]:
-                if capture is not None and hasattr(capture, "get_abs_cords"):
-                    return capture.get_abs_cords(point[0], point[1])
-                return point
-
-            start_abs = to_screen(start)
-            end_abs = to_screen(end)
-            steps = max(6, round(duration / 0.03))
-            win32api.SetCursorPos(start_abs)
-            time.sleep(0.03)
-            win32api.mouse_event(win32con.MOUSEEVENTF_LEFTDOWN, 0, 0, 0, 0)
-            try:
-                for index in range(1, steps + 1):
-                    ratio = index / steps
-                    x = round(start_abs[0] + (end_abs[0] - start_abs[0]) * ratio)
-                    y = round(start_abs[1] + (end_abs[1] - start_abs[1]) * ratio)
-                    win32api.SetCursorPos((x, y))
-                    time.sleep(duration / steps)
-            finally:
-                win32api.mouse_event(win32con.MOUSEEVENTF_LEFTUP, 0, 0, 0, 0)
-
-        self.operate(action, block=True, restore_cursor=True)
-        self.sleep(after_sleep)
-
-    def scroll_client(
-        self,
-        relative_point: tuple[float, float],
-        scroll_amount: int,
-        count: int = 1,
-        interval: float = 0.1,
-        after_sleep: float = 0.0,
-    ) -> None:
-        """Send foreground mouse-wheel events at a relative client point."""
-
-        frame = self.capture_frame()
-        height, width = frame.shape[:2]
-        x = round(max(0.0, min(1.0, relative_point[0])) * width)
-        y = round(max(0.0, min(1.0, relative_point[1])) * height)
-        wheel_count = max(1, int(count))
-        wheel_interval = max(0.0, float(interval))
-        interaction = getattr(self.executor, "interaction", None)
-        if interaction is None or not hasattr(interaction, "scroll"):
-            raise RuntimeError("当前交互对象不支持鼠标滚轮")
-
-        def action():
-            import win32api
-
-            if hasattr(interaction, "force_activate"):
-                interaction.force_activate()
-            elif hasattr(interaction, "try_activate"):
-                interaction.try_activate()
-            capture = getattr(interaction, "capture", None)
-            if capture is not None and hasattr(capture, "get_abs_cords"):
-                win32api.SetCursorPos(capture.get_abs_cords(x, y))
-            for index in range(wheel_count):
-                interaction.scroll(x, y, int(scroll_amount))
-                if index + 1 < wheel_count:
-                    time.sleep(wheel_interval)
-
-        self.operate(action, block=True, restore_cursor=True)
-        self.sleep(after_sleep)
-
-    def _sleep_after_recognition(self) -> None:
-        seconds = float(self.config.get("识别成功后等待秒数", 1.0))
-        if seconds > 0:
-            self.sleep(seconds)
 
     def clear_temporary_home_announcement_if_needed(
         self,
