@@ -104,107 +104,12 @@ class KnownViolation:
         return f"{self.rule} {self.path} [{self.detail}]"
 
 
-_P1_CLEANUP = (
-    "P1（refactor/vision-models）把公共模型下沉到 src.utils.vision_models 并改写导入点后，"
-    "删除本条目。"
-)
-_P1_MIXIN_CLEANUP = (
-    "P1 把 Vision 迁出 src.tasks.map_trade（下沉到 src/utils）并改写 mixin 导入后，删除本条目。"
-)
 R6_KEEP_CLICK_WINDOW = (
     "不清理：语义正确，保留点击时间窗写法；如需改动必须同步 FreeGachaTask 的点击次数断言。"
 )
 R6_KEEP_UPSTREAM_HOOK = "不清理：跟随上游 ok 库契约，若上游改动钩子签名再评估。"
 
 EXCEPTIONS: tuple[KnownViolation, ...] = (
-    # ---- R3：公共任务依赖 map_trade 领域模型（P1 清理）----
-    KnownViolation(
-        rule="R3",
-        path="src/tasks/DailyTask.py",
-        detail=MAP_TRADE_MODELS,
-        reason="日常任务为了共用 TemplateSpec 依赖了 map_trade 领域模型（P0.5 依赖审计在册）。",
-        cleanup=_P1_CLEANUP,
-    ),
-    KnownViolation(
-        rule="R3",
-        path="src/tasks/FreeGachaTask.py",
-        detail=MAP_TRADE_MODELS,
-        reason=(
-            "免费抽卡任务为了共用 MatchResult / TemplateSpec 依赖了 map_trade 领域模型"
-            "（P0.5 依赖审计在册）。"
-        ),
-        cleanup=_P1_CLEANUP,
-    ),
-    KnownViolation(
-        rule="R3",
-        path="src/tasks/PVPTask.py",
-        detail=MAP_TRADE_MODELS,
-        reason=(
-            "PVP 任务为了共用 MatchResult / TemplateSpec 依赖了 map_trade 领域模型"
-            "（P0.5 依赖审计在册）。"
-        ),
-        cleanup=_P1_CLEANUP,
-    ),
-    KnownViolation(
-        rule="R3",
-        path="src/tasks/SquareGoddessTask.py",
-        detail=MAP_TRADE_MODELS,
-        reason=(
-            "梦幻广场任务为了共用 MatchResult / TemplateSpec 依赖了 map_trade 领域模型"
-            "（P0.5 依赖审计在册）。"
-        ),
-        cleanup=_P1_CLEANUP,
-    ),
-    KnownViolation(
-        rule="R3",
-        path="src/tasks/quick_hunt.py",
-        detail=MAP_TRADE_MODELS,
-        reason=(
-            "快速狩猎辅助模块为了共用 TemplateSpec 依赖了 map_trade 领域模型（P0.5 依赖审计在册）。"
-        ),
-        cleanup=_P1_CLEANUP,
-    ),
-    KnownViolation(
-        rule="R3",
-        path="src/tasks/trigger/AutoLoginTask.py",
-        detail=MAP_TRADE_MODELS,
-        reason=(
-            "自动登录触发任务为了共用 MatchResult / TemplateSpec 依赖了"
-            " map_trade 领域模型（P0.5 依赖审计在册）。"
-        ),
-        cleanup=_P1_CLEANUP,
-    ),
-    KnownViolation(
-        rule="R3",
-        path=TASK_VISION_MIXIN,
-        detail=MAP_TRADE_MODELS,
-        reason=(
-            "公共视觉基座为了共用 MatchResult / TemplateSpec 依赖了"
-            " map_trade 领域模型（P0.5 依赖审计在册）。"
-        ),
-        cleanup=_P1_CLEANUP,
-    ),
-    # ---- R4：公共视觉基座依赖 map_trade 领域实现（P1 清理）----
-    KnownViolation(
-        rule="R4",
-        path=TASK_VISION_MIXIN,
-        detail=MAP_TRADE_MODELS,
-        reason=(
-            "公共视觉基座 import map_trade.models，属“公共业务依赖具体领域”"
-            "（P0.5 依赖审计第 3 条）。"
-        ),
-        cleanup=_P1_CLEANUP,
-    ),
-    KnownViolation(
-        rule="R4",
-        path=TASK_VISION_MIXIN,
-        detail="src.tasks.map_trade.vision",
-        reason=(
-            "公共视觉基座 import map_trade.vision 的 Vision，是“公共业务依赖具体领域”的最大单点"
-            "（P0.5 依赖审计第 3 条）。"
-        ),
-        cleanup=_P1_MIXIN_CLEANUP,
-    ),
     # ---- R6：语义正确、不属于“零等待不采样”轮询契约的历史写法 ----
     KnownViolation(
         rule="R6",
@@ -786,18 +691,22 @@ class ArchitectureLayerGuardTest(unittest.TestCase):
                 self.assertEqual((), rule_violations(rule, edges))
 
     def test_known_exceptions_suppress_only_their_own_violation(self) -> None:
-        registered = parse_imports(
-            "src/tasks/DailyTask.py",
-            "src.tasks.DailyTask",
-            "from src.tasks.map_trade.models import TemplateSpec\n",
+        """例外只放行自己登记的那一条（R3/R4 的 P1 例外已随 P1 合并删除）。
+
+        用仍然在册的 R6 例外验证：同文件同守卫在册→放行；换个文件→必须仍报违规。
+        """
+        registered = parse_while_guards(
+            "src/tasks/FreeGachaTask.py",
+            "src.tasks.FreeGachaTask",
+            "def probe(end_at):\n    while monotonic() < end_at:\n        pass\n",
         )
-        self.assertEqual((), unresolved_violations(rule_violations("R3", registered)))
-        unregistered = parse_imports(
+        self.assertEqual((), unresolved_violations(r6_violations(registered)))
+        unregistered = parse_while_guards(
             "src/tasks/NewTask.py",
             "src.tasks.NewTask",
-            "from src.tasks.map_trade.models import TemplateSpec\n",
+            "def probe(end_at):\n    while monotonic() < end_at:\n        pass\n",
         )
-        self.assertEqual(1, len(unresolved_violations(rule_violations("R3", unregistered))))
+        self.assertEqual(1, len(unresolved_violations(r6_violations(unregistered))))
 
     def test_while_guard_detector_catches_synthetic_violations(self) -> None:
         source = "def poll(end_at):\n    while monotonic() <= end_at:\n        sample()\n"

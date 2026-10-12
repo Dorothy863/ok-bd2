@@ -130,15 +130,6 @@ src/tasks/task_vision_mixin             → src/tasks/map_trade     （R4）
 
 | 编号 | 文件 | 命中细节 | 原因 | 清理计划 |
 |---|---|---|---|---|
-| R3 | `src/tasks/DailyTask.py` | `src.tasks.map_trade.models` | 公共任务共用 `TemplateSpec` | P1 下沉公共模型后删除 |
-| R3 | `src/tasks/FreeGachaTask.py` | `src.tasks.map_trade.models` | 共用 `MatchResult` / `TemplateSpec` | P1 下沉公共模型后删除 |
-| R3 | `src/tasks/PVPTask.py` | `src.tasks.map_trade.models` | 共用 `MatchResult` / `TemplateSpec` | P1 下沉公共模型后删除 |
-| R3 | `src/tasks/SquareGoddessTask.py` | `src.tasks.map_trade.models` | 共用 `MatchResult` / `TemplateSpec` | P1 下沉公共模型后删除 |
-| R3 | `src/tasks/quick_hunt.py` | `src.tasks.map_trade.models` | 共用 `TemplateSpec` | P1 下沉公共模型后删除 |
-| R3 | `src/tasks/trigger/AutoLoginTask.py` | `src.tasks.map_trade.models` | 共用 `MatchResult` / `TemplateSpec` | P1 下沉公共模型后删除 |
-| R3 | `src/tasks/task_vision_mixin.py` | `src.tasks.map_trade.models` | 公共视觉基座共用 `MatchResult` / `TemplateSpec` | P1 下沉公共模型后删除 |
-| R4 | `src/tasks/task_vision_mixin.py` | `src.tasks.map_trade.models` | 公共视觉基座 import 领域模型 | P1 下沉公共模型后删除 |
-| R4 | `src/tasks/task_vision_mixin.py` | `src.tasks.map_trade.vision` | 公共视觉基座 import 领域 `Vision`，是“公共业务依赖具体领域”的最大单点 | P1 把 `Vision` 迁出 `map_trade` 后删除 |
 | R6 | `src/tasks/FreeGachaTask.py` | `monotonic() < end_at` | `_click_skip_until_back_page` 是**点击时间窗**而非“等待并确认”轮询：窗口按 `[start, start+duration)` 计，用 `<=` 会多出一次点击（测试断言 3.0s/0.2s 恰好 15 次点击），且零时长=不点击是期望行为 | 不清理（语义正确）；改动需同步点击次数断言 |
 | R6 | `src/compat/windows_graphics.py` | `time.monotonic() < deadline` | `_capture_can_produce_visible_frame` 是注入给上游 `ok` 库的钩子（`_capture_can_produce_frame`），超时由库侧给定，不属于本仓库 `_wait_*` 轮询契约 | 不清理（跟随上游契约） |
 
@@ -149,7 +140,12 @@ src/tasks/task_vision_mixin             → src/tasks/map_trade     （R4）
    条目过期（已无对应真实违规）时失败，避免“陈旧例外掩盖新违规”的假绿。
 3. `test_every_exception_is_documented` 保证每条例外都有规则编号、路径、命中细节、原因与清理计划。
 
-当前 11 条 = 9 条待 P1（`refactor/vision-models`）清理的 R3/R4 + 2 条语义正确的 R6。
+当前 2 条，均为语义正确、**永久保留**的 R6 例外。
+
+> 历史：本轮最初登记 11 条，另 9 条 R3/R4 属“公共任务依赖 map_trade 领域模型”，
+> 由工作包 P1（`refactor/vision-models`）清理。P1 合并当天即从守卫与本文档中删除；
+> `test_every_exception_still_covers_a_real_violation` 会在例外过期时失败，
+> 以此强制清理陈旧例外，避免“陈旧例外掩盖新违规”。
 
 ## 5. 运行方式与失败信息
 
@@ -206,7 +202,7 @@ R6 的“语句”一栏是守卫本身，附所属函数，例如：
 - `uv run ruff check .`：通过。
 - `uv run python -m unittest discover -s tests -p "test_*.py"`：全过（含本守卫 17 项）。
 - 扫描规模：`src/**` 104 个 `.py`，其中 94 个含 import。
-- 规则扫描结果：R1 = 0、R2 = 0、R5 方向 = 0、R5 环 = 0；R3 = 7、R4 = 2、R6 = 2，全部登记为例外。
+- 规则扫描结果（P1 合并后复跑）：R1 = 0、R2 = 0、R3 = 0、R4 = 0、R5 方向 = 0、R5 环 = 0；R6 = 2（在册例外）。
 
 ## 8. 边界：本守卫不检查什么
 
