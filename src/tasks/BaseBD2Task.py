@@ -92,6 +92,7 @@ class BaseBD2Task(BaseTask):
         self.default_config.update(
             {
                 "识别成功后等待秒数": 1.0,
+                "执行前自动返回主页": True,
                 # 自动返回主页按钮位置（右上角“小房子”，格鲁菲餐厅实测 2560x1440 的约 (2400,85)）。
                 "返回主页按钮 X 百分比": 93.75,
                 "返回主页按钮 Y 百分比": 5.9,
@@ -107,6 +108,7 @@ class BaseBD2Task(BaseTask):
         self.config_description.update(
             {
                 "识别成功后等待秒数": "识别成功后，执行下一步点击或切换操作前等待多久。",
+                "执行前自动返回主页": "任务开始前是否先尝试自动返回主页；关闭后直接执行任务。",
                 "返回主页按钮 X 百分比": "自动返回主页按钮的横向百分比。",
                 "返回主页按钮 Y 百分比": "自动返回主页按钮的纵向百分比。",
                 "主页确认自动返回主页次数": "主页确认超时后，自动点击返回主页按钮的最大次数。",
@@ -361,12 +363,16 @@ class BaseBD2Task(BaseTask):
                 self.operate_click(x, y, name="自动返回主页-房子", after_sleep=settle)
                 continue
 
+            if self._click_gacha_detail_close(frame, step):
+                self.sleep(settle)
+                continue
+
             if self._click_top_left_back(frame, step):
                 self.sleep(settle)
                 continue
 
             self.log_warning(
-                "自动返回主页：当前非主页且未找到 H/房子或左上角返回按钮，无法继续。"
+                "自动返回主页：当前非主页且未找到 H/房子、详情关闭或左上角返回按钮，无法继续。"
             )
             return False
 
@@ -402,6 +408,60 @@ class BaseBD2Task(BaseTask):
                 if cx / frame_w > 0.7 and cy / frame_h < 0.25:
                     has_house_hint = True
         return is_home, has_house_hint
+
+    def _click_gacha_detail_close(self, frame, step: int) -> bool:
+        """Close the gacha character-detail layer by its OCR X button."""
+        try:
+            boxes = list(
+                self.ocr(
+                    frame=frame,
+                    threshold=0.2,
+                    log=False,
+                    name="自动返回主页-抽卡详情",
+                )
+            )
+        except Exception:
+            return False
+
+        names = [str(getattr(box, "name", "") or "") for box in boxes]
+        joined = " ".join(names)
+        required = ("抽抽乐点数", "抽1次", "抽10次")
+        if not all(keyword in joined for keyword in required):
+            return False
+
+        frame_h, frame_w = frame.shape[:2]
+        for box in boxes:
+            name = str(getattr(box, "name", "") or "").strip().upper()
+            if name not in {"X", "×", "✕"}:
+                continue
+            try:
+                x, y, width, height = (
+                    int(box.x),
+                    int(box.y),
+                    int(box.width),
+                    int(box.height),
+                )
+            except Exception:
+                continue
+            center_x = x + width // 2
+            center_y = y + height // 2
+            if not (
+                0.45 * frame_w <= center_x <= 0.95 * frame_w
+                and 0.10 * frame_h <= center_y <= 0.65 * frame_h
+            ):
+                continue
+            self.log_info(
+                f"自动返回主页：第 {step} 步识别到抽卡详情页，点击关闭 X @"
+                f"({center_x},{center_y})。"
+            )
+            self.operate_click(
+                center_x / frame_w,
+                center_y / frame_h,
+                name="自动返回主页-抽卡详情关闭",
+                after_sleep=0.0,
+            )
+            return True
+        return False
 
     def _click_top_left_back(self, frame, step: int) -> bool:
         """在左上角 ROI 内用模板匹配“返回”条，命中则点其中心。"""

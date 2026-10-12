@@ -118,6 +118,40 @@ class DailyBatchTaskTest(unittest.TestCase):
         self.assertIs(original_second_config, second.config)
         self.assertEqual(2, len(resets))
 
+    def test_auto_return_home_before_child_can_be_disabled(self):
+        class First:
+            pass
+
+        calls = []
+        child = _ChildTask("first", calls)
+        child.config = {"启用": False, "执行前自动返回主页": False}
+        child.auto_return_main_home = lambda: calls.append(("home", True)) or True
+        task, _resets = self.make_task(
+            {First: child},
+            (DailyBatchChild("第一项", First),),
+            {"启用": True, "第一项": True},
+        )
+
+        self.assertTrue(DailyBatchTask.run(task))
+        self.assertEqual([("first", True)], calls)
+
+    def test_auto_return_home_before_child_can_be_enabled(self):
+        class First:
+            pass
+
+        calls = []
+        child = _ChildTask("first", calls)
+        child.config = {"启用": False, "执行前自动返回主页": True}
+        child.auto_return_main_home = lambda: calls.append(("home", True)) or True
+        task, _resets = self.make_task(
+            {First: child},
+            (DailyBatchChild("第一项", First),),
+            {"启用": True, "第一项": True},
+        )
+
+        self.assertTrue(DailyBatchTask.run(task))
+        self.assertEqual([("home", True), ("first", True)], calls)
+
     def test_progress_is_published_after_each_child(self):
         class First:
             pass
