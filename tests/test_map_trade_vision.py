@@ -28,11 +28,11 @@ from src.tasks.map_trade.navigator import (
     SANDBOX_TELEPORT_SKILL_TEMPLATE,
 )
 from src.tasks.map_trade.trader import BUY_CONFIRM_DIALOG_REGION
-from src.tasks.map_trade.vision import (
+from src.utils.template_resolution import offline_template_scale
+from src.utils.vision_runtime import (
     Vision,
     parse_used_limit,
 )
-from src.utils.template_resolution import offline_template_scale
 from tests.helpers.map_trade import FakeTask
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -308,7 +308,7 @@ class VisionTest(unittest.TestCase):
             path = Path(directory) / "root-alpha.png"
             self.assertTrue(cv2.imwrite(str(path), template))
             with patch(
-                "src.tasks.map_trade.vision.TEMPLATE_DIR",
+                "src.utils.vision_runtime.TEMPLATE_DIR",
                 Path(directory),
             ):
                 _gray, mask = Vision(FakeTask())._load(TemplateSpec("root alpha", path.name))
@@ -335,7 +335,7 @@ class VisionTest(unittest.TestCase):
                 dtype=np.uint8,
             )
             with patch(
-                "src.tasks.map_trade.vision.TEMPLATE_DIR",
+                "src.utils.vision_runtime.TEMPLATE_DIR",
                 Path(directory),
             ):
                 ratios = Vision(FakeTask()).template_color_ratios(
@@ -369,7 +369,7 @@ class VisionTest(unittest.TestCase):
                 dtype=np.uint8,
             )
             with patch(
-                "src.tasks.map_trade.vision.TEMPLATE_DIR",
+                "src.utils.vision_runtime.TEMPLATE_DIR",
                 Path(directory),
             ):
                 ratios = Vision(FakeTask()).template_hsv_color_ratios(
