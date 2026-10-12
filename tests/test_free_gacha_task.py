@@ -10,7 +10,7 @@ from src.tasks.FreeGachaTask import (
     REFERENCE_WIDTH,
     FreeGachaTask,
 )
-from src.tasks.map_trade.models import MatchResult
+from src.utils.vision_models import MatchResult
 
 free_gacha_module = importlib.import_module("src.tasks.FreeGachaTask")
 

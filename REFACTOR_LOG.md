@@ -548,3 +548,70 @@ git diff --check
 - 阶段三/四/五的实机行为差异（额度耗尽终止、跑商入口失败、分类 ROI、快速狩猎
   组合化）以测试锁定，实机验证与发版门禁继续按 AGENTS.md 当前计划执行
   （收到明确发布请求后再推送、打标签与发布）。
+
+---
+
+## 七、阶段七：分层重构（进行中）
+
+本轮目标：把「概念分层、依赖交叉」收敛为可验证的分层 + 端口适配器。
+完整计划见 `docs/refactor-plan.md`；本节记录基线、分工与验收协议。
+
+### 7.1 基线绿化（P0.5，已完成并推送）
+
+进入重构前必须先有绿色基线，否则无法判定回归。本轮开工时基线是**红的**：
+`unittest discover` 1034 项中 15 项失败。
+
+根因（Python 3.14 / Windows）：
+
+- Python 3.14 把 `time.monotonic()` 的分辨率从 15.6ms 提升到 ~100ns
+  （3.12 实测 `resolution=0.015625`，3.14 实测 `1e-07`）。
+- 旧写法 `end_at = monotonic() + X` + `while monotonic() <= end_at` 在 `X = 0`
+  时，3.12 上两次读数落在同一 tick，**侥幸**执行一次；3.14 上首次判断即超时，
+  **一次都不采样屏幕**。所以这不是"升级引入的 bug"，而是升级**暴露**的既有缺陷：
+  所有 `_wait_*` 轮询在零等待配置下等于完全不工作。
+
+处理：
+
+- 新增 `src/utils/polling.py::PollDeadline`，把「零等待也要采样一次」显式化；
+  其余情况与 `monotonic() <= end_at` 的迭代次数、时钟读取次数**完全一致**
+  （因此既有的时间夹具 `patch("<task module>.monotonic")` 继续有效）。
+- 循环体尾部（`while True` + 收尾判断）的截止检查用纯 `deadline.expired()`，
+  避免多一次迭代。
+- 覆盖 81 处循环守卫 + 若干收尾检查；`src/` 内不再有比较 `monotonic()` 与截止
+  时间的循环守卫（两处语义正确的例外见 `docs/architecture-rules.md`）。
+- `BaseBD2Task._click_top_left_back` 原先直接 `cv2.matchTemplate`，改走同文件已在
+  使用的 `template_match_response`，恢复「模板匹配集中化」守卫测试。
+- `SquareGoddessTask._click_fantasia_square_card`（梦幻广场小卡面 OCR + 固定坐标
+  兜底）按第三轮 review 结论回退，恢复「生活玩法游戏卡带 → 固定第二格 → 确认
+  梦幻广场」单一路径。
+
+提交与备份：
+
+| 提交 | 说明 |
+| --- | --- |
+| `80000b9` | `fix(waits): 零等待轮询至少采样一次，并恢复集中式模板匹配` |
+| `387dd72` | `fix(square-goddess): 回退梦幻广场小卡面 OCR，恢复固定第二格流程` |
+| `16574c6` | `docs(refactor): 记录 P0.5 基线绿化、轮询契约与依赖审计复核` |
+
+- 回滚点：分支/标签 `pre-refactor-20261012`（`c37d4ee`），已推送远端。
+- 基线证据：`uv run ruff check .` 通过；1034 项测试全过。
+- 远端（`origin` = Dorothy863/ok-bd2）：`main` = `16574c6`；本地离线镜像
+  `D:\workspace\_backup\ok-bd2.git` 同步。
+
+### 7.2 分工（每个工作包独立 worktree + 独立分支）
+
+| 工作包 | 分支 | worktree | 写入范围 |
+| --- | --- | --- | --- |
+| P1 公共视觉模型下沉 | `refactor/vision-models` | `D:\workspace\ok-bd2-vision` | `src/utils/vision_*`、`src/tasks/map_trade/vision.py`、非领域任务的 import 点 |
+| P2 页面识别服务 | `refactor/page-recognition` | `D:\workspace\ok-bd2-page` | `src/tasks/page_recognition.py`、`src/tasks/BaseBD2Task.py`、相关测试 |
+| P6 架构守卫 | `test/architecture-guard` | `D:\workspace\ok-bd2-guard` | `tests/test_architecture_layers.py`、`docs/architecture-rules.md` |
+
+### 7.3 主 Agent 验收协议（每个工作包合并前）
+
+1. 审 diff：确认只动了授权范围，未夹带游戏业务改动。
+2. AST 依赖审计（不只看测试）：跨层方向、公共模型依赖、`PollDeadline` 契约。
+3. `uv run ruff check .` 静默通过。
+4. 全量 `unittest discover` 1034+ 项全过。
+5. 至少一次真实场景验证（主页识别 / 抽卡详情关闭返回主页 / 一键日常逐模块
+   「执行前自动返回主页」开关），不以定向单测代替实机。
+6. 架构守卫与实机同时通过才合并；按 P1 → P2 → P6 顺序合并，每次合并点重跑全量。

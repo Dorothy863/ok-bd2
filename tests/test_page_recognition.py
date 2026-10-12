@@ -1,0 +1,149 @@
+"""回归：页面识别服务的主页精确匹配、抽卡详情信号与 UNKNOWN 不盲点。"""
+
+import unittest
+
+import numpy as np
+
+from src.tasks.page_recognition import (
+    GACHA_DETAIL_KEYWORDS,
+    HOME_GACHA_LABEL,
+    PageId,
+    build_page_signals,
+    identify_page,
+)
+
+FRAME = np.zeros((1440, 2560, 3), dtype=np.uint8)
+
+
+class _Box:
+    def __init__(self, name, x, y, width, height):
+        self.name = name
+        self.x = x
+        self.y = y
+        self.width = width
+        self.height = height
+
+
+class _BoxWithoutCoordinates:
+    def __init__(self, name):
+        self.name = name
+
+
+def _detail_boxes(**overrides):
+    labels = {
+        "抽抽乐点数": (211, 1337, 138, 34),
+        "抽1次": (1944, 1289, 104, 48),
+        "抽10次": (2227, 1292, 128, 45),
+    }
+    labels.update(overrides)
+    return [_Box(name, *geometry) for name, geometry in labels.items()]
+
+
+class PageRecognitionTest(unittest.TestCase):
+    def test_page_id_defines_required_pages(self):
+        names = {page.name for page in PageId}
+        self.assertLessEqual({"HOME", "GACHA_DETAIL", "UNKNOWN"}, names)
+
+    def test_exact_home_label_is_home(self):
+        recognition = identify_page(FRAME, [_Box("抽抽乐", 171, 1342, 88, 37)])
+
+        self.assertIs(PageId.HOME, recognition.page)
+        self.assertTrue(recognition.signals.is_home)
+
+    def test_home_label_is_matched_after_normalization(self):
+        recognition = identify_page(FRAME, [_Box(f" {HOME_GACHA_LABEL} ", 171, 1342, 88, 37)])
+
+        self.assertIs(PageId.HOME, recognition.page)
+
+    def test_gacha_point_label_is_not_home(self):
+        recognition = identify_page(FRAME, [_Box("抽抽乐点数", 211, 1337, 138, 34)])
+
+        self.assertIs(PageId.UNKNOWN, recognition.page)
+        self.assertFalse(recognition.signals.is_home)
+
+    def test_paid_gacha_label_is_not_home(self):
+        recognition = identify_page(FRAME, [_Box("付费抽抽乐", 1605, 1294, 152, 37)])
+
+        self.assertIs(PageId.UNKNOWN, recognition.page)
+        self.assertFalse(recognition.signals.is_home)
+
+    def test_detail_labels_alone_produce_gacha_detail(self):
+        recognition = identify_page(FRAME, _detail_boxes())
+
+        self.assertIs(PageId.GACHA_DETAIL, recognition.page)
+        self.assertEqual(GACHA_DETAIL_KEYWORDS, recognition.signals.gacha_detail_keywords)
+
+    def test_gacha_detail_requires_every_keyword(self):
+        for missing in GACHA_DETAIL_KEYWORDS:
+            with self.subTest(missing=missing):
+                boxes = [box for box in _detail_boxes() if box.name != missing]
+                self.assertIs(PageId.UNKNOWN, identify_page(FRAME, boxes).page)
+
+    def test_gacha_detail_keywords_keep_raw_substring_semantics(self):
+        recognition = identify_page(
+            FRAME,
+            [_Box(label, 211, 1337, 138, 34) for label in ("抽抽乐点数", "抽1次", "抽10次可选")],
+        )
+
+        self.assertIs(PageId.GACHA_DETAIL, recognition.page)
+
+    def test_home_takes_priority_over_gacha_detail_labels(self):
+        boxes = [*_detail_boxes(), _Box("抽抽乐", 171, 1342, 88, 37)]
+
+        self.assertIs(PageId.HOME, identify_page(FRAME, boxes).page)
+
+    def test_detail_close_center_comes_from_in_region_x_label(self):
+        recognition = identify_page(FRAME, [*_detail_boxes(), _Box("X", 1875, 410, 37, 40)])
+
+        self.assertIs(PageId.GACHA_DETAIL, recognition.page)
+        self.assertEqual((1893, 430), recognition.detail_close_center)
+
+    def test_detail_close_region_bounds_are_inclusive(self):
+        recognition = identify_page(FRAME, [*_detail_boxes(), _Box("X", 1132, 410, 40, 40)])
+
+        self.assertEqual((1152, 430), recognition.detail_close_center)
+
+    def test_detail_close_center_ignores_out_of_region_x_label(self):
+        recognition = identify_page(FRAME, [*_detail_boxes(), _Box("X", 100, 1300, 40, 40)])
+
+        self.assertIs(PageId.GACHA_DETAIL, recognition.page)
+        self.assertIsNone(recognition.detail_close_center)
+
+    def test_box_without_coordinates_is_skipped(self):
+        recognition = identify_page(
+            FRAME,
+            [*_detail_boxes(), _BoxWithoutCoordinates("X"), _BoxWithoutCoordinates("H")],
+        )
+
+        self.assertIs(PageId.GACHA_DETAIL, recognition.page)
+        self.assertIsNone(recognition.detail_close_center)
+        self.assertFalse(recognition.has_house_hint)
+
+    def test_house_hint_keeps_normalized_strict_comparison(self):
+        """旧实现用归一化文本与 "H" 严格比较，收敛后保持同一语义。"""
+        recognition = identify_page(FRAME, [_Box("H", 2000, 80, 40, 40)])
+
+        self.assertIs(PageId.UNKNOWN, recognition.page)
+        self.assertIsNone(recognition.signals.house_hint_center)
+        self.assertFalse(recognition.has_house_hint)
+
+    def test_unknown_without_any_label(self):
+        recognition = identify_page(FRAME, [])
+
+        self.assertIs(PageId.UNKNOWN, recognition.page)
+        self.assertEqual((), recognition.signals.gacha_detail_keywords)
+        self.assertIsNone(recognition.detail_close_center)
+
+    def test_build_page_signals_is_pure_and_reusable(self):
+        boxes = [*_detail_boxes(), _Box("X", 1875, 410, 37, 40)]
+
+        first = build_page_signals(FRAME, boxes)
+        second = build_page_signals(FRAME, boxes)
+
+        self.assertEqual(first, second)
+        self.assertEqual(GACHA_DETAIL_KEYWORDS, first.gacha_detail_keywords)
+        self.assertEqual((1893, 430), first.detail_close_center)
+
+
+if __name__ == "__main__":
+    unittest.main()

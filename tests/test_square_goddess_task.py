@@ -5,7 +5,6 @@ from unittest.mock import patch
 
 import numpy as np
 
-from src.tasks.map_trade.models import MatchResult, TemplateSpec
 from src.tasks.SquareGoddessTask import (
     FANTASIA_SQUARE_TEMPLATE,
     GODDESS_DAILY_REGION,
@@ -30,6 +29,7 @@ from src.utils.cartridge_quick_switch import (
     LIFE_GAMEPLAY_CATEGORY_OCR_ROI,
     LIFE_GAMEPLAY_CATEGORY_POINT,
 )
+from src.utils.vision_models import MatchResult, TemplateSpec
 
 
 class SquareGoddessEntryTest(unittest.TestCase):
