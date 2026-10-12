@@ -658,3 +658,31 @@ P5（表达层收敛）经实测判定**已达成**，不派發：UI 只经 `tas
 
 P7 实机验收新增工具 `scripts/verify_auto_return.py`（`identify` / `return` 两种模式），
 用于在你启动客户端后一次性产出「识别前页面 → 自动返回 → 识别后页面」的证据。
+
+### 7.7 第二批工作包合并记录（2026-10-12）
+
+| 合并点 | 提交 | 复核结果 |
+| --- | --- | --- |
+| P4 `BaseBD2Task` 拆分 | `bc622fc` | ruff 通过；1080 项全过；守卫 17 项通过；AST 比对 107 个函数——函数体差异 0 处 |
+| P3 端口层（含打回重做） | 见下 | ruff 通过；1093 项全过；守卫 18 项（新增 R7）通过 |
+
+**P3 的打回与收口**（主 Agent 复审发现并纠正的设计问题）：
+
+- 首版把端口放在 `src/tasks/ports.py`。由于守卫 R2 禁止 `src/utils → src/tasks`，
+  `src/utils/vision_runtime.py` 只能自带一份镜像协议 `VisionTaskPort`，形成**两份定义**。
+- 判定：不可接受。计划第 2 节把端口画成独立一层，因此端口必须放在双方都能引用的中性层。
+- 收口：端口移到 `src/ports/__init__.py`（唯一定义点，运行时只依赖 stdlib，`numpy` 仅
+  `TYPE_CHECKING`），删除镜像；新增守卫 **R7**：`src/ports` 不得 import 包外 `src.*`。
+- 主 Agent 独立验证：AST 逐条比对 `task_vision_mixin.py` / `vision_runtime.py` 的函数体与
+  默认值——**0 处差异**（只有签名注解变化）；自行注入 R7 违规确认守卫报出
+  规则编号 + 文件 + 行号 + 语句后字节还原。
+
+拆分后职责分布：
+
+- `src/tasks/device_ops_mixin.py`（16 方法）：截图 / 保存 / OCR / 探针输出 / 绿幕识别 /
+  点击 / 拖动 / 滚轮 / 日志点击 / 识别后等待。
+- `src/tasks/cartridge_home_mixin.py`（20 方法）：自动返回主页、抽卡详情关闭、左上角返回、
+  卡带快速切换、近期卡带 PVP 特殊页处理等业务。
+- `src/tasks/BaseBD2Task.py`（219 行）：状态输出（`info_*` / `task_info_snapshot`）、
+  生命周期、初始化，继承两个 mixin。
+- `src/ports/__init__.py`：端口契约（`TaskSurface` 等），被 `src/tasks` 与 `src/utils` 共同引用。

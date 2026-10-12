@@ -34,8 +34,8 @@
   PageRecognition / Navigation / Trader / Collector / Progress
         ↓ 只依赖端口
 
-端口 Ports
-  CapturePort / OcrPort / TemplatePort / InputPort / ProgressPort
+端口 Ports（中性抽象层，实现位置 src/ports/）
+  TaskSurface = CapturePort + OcrPort + InputPort + ConfigPort + StatusPort + ProgressPort
 
 适配器 Adapters
   WGC / BitBlt / onnxocr / BD2Interaction / 文件存储
@@ -250,9 +250,11 @@ BaseBD2Task 中的 capture/ocr/click 通过端口或明确 adapter 转发
 **写入范围**：
 
 ```text
-src/tasks/ports.py
-src/tasks/BaseBD2Task.py
+src/ports/（中性抽象层，端口唯一定义点）
+src/utils/vision_runtime.py
+src/tasks/task_vision_mixin.py
 tests/test_ports.py
+tests/test_architecture_layers.py（R7）
 ```
 
 ### P4 BaseBD2Task 拆分
@@ -368,6 +370,8 @@ uv run python -m unittest discover -s tests -p "test_*.py"
 | P1 公共视觉模型下沉 | `refactor/vision-models` | `2ecb360` / `ed3ed02` / `71b8cfb` | 独立 AST 审计：非领域任务 → map_trade 归零；`task_vision_mixin` 无 map_trade 依赖；`Vision` 迁移 diff 仅 4 处（docstring/import/`parents[3]→[2]`/`MAP_TRADE_REFERENCE→HD_720`，同值同对象）；ruff + 1034 项全过 |
 | P2 页面识别服务 | `refactor/page-recognition` | `2314a46` / `232f536` | 逐行核对判定规则与原实现等价（精确等值、关键词子串、区域闭区间、优先级 HOME > GACHA_DETAIL > UNKNOWN）；写入范围仅 4 文件；ruff + 1056 项全过 |
 | P6 架构守卫 | `test/architecture-guard` | `fc8fc32` / `bb0f363` | 我自行注入 R1/R6 违规验证守卫**非假绿**（报出规则编号+文件+行号+语句）后复原；P1 合并后删除 9 条过期例外；ruff + 1073 项全过 |
+| P3 端口抽象 | `refactor/ports` | `310ed1f` / `6a7001f` / `bc4843f` / `5b02c23` | 首版因 R2 禁止 `utils → tasks` 而在 `vision_runtime` 产生镜像协议，复审判定**两份定义不可接受**，打回改为中性层 `src/ports/` 并删镜像；我独立核对 `task_vision_mixin` / `vision_runtime` 的函数体与默认值**逐条 AST 比对为 0 差异**（仅签名注解变化），并自己注入 R7 违规验证守卫非假绿；ruff + 1093 项 + 守卫 18 项全过 |
+| P4 `BaseBD2Task` 拆分 | `refactor/base-task-split` | `cbbf1bc` / `7cddcf3` / `23ab2d2` | 我独立比对拆分前/后的 107 个函数 AST：`missing`/`extra` 为同名方法的归属迁移，**函数体差异 0 处**；`BaseBD2Task` 1054 → 219 行；MRO 正确（两个 mixin 在 `BaseTask` 之前、无 `__init__`、`_pvp_special_page_action` 仍为 classmethod）、mixin 无反向上依赖；ruff + 1080 项全过 |
 
 合并后 `main` 实测：`src/**` 106 个文件；R1/R2/R3/R4/R5 = 0 违规；R6 仅 2 条在册例外（语义正确）。
 
@@ -376,8 +380,8 @@ uv run python -m unittest discover -s tests -p "test_*.py"
 | 项 | 内容 | 阻塞 |
 | --- | --- | --- |
 | P7 实机验收 | 主页识别 / 抽卡详情关闭返回主页 / 一键日常逐模块「执行前自动返回主页」开关 | 需要游戏客户端在跑且用户在场；已备好 `scripts/verify_auto_return.py` |
-| P3 端口抽象 | `src/tasks/ports.py`（CapturePort/OcrPort/TemplatePort/InputPort/ProgressPort） | 未开工 |
-| P4 `BaseBD2Task` 拆分 | 工具操作 / 页面业务 / 状态输出三分离 | 未开工（P2 已把页面识别搬出） |
+| P3 端口抽象 | **已完成**：`src/ports/` 唯一定义 + R7 守卫（`src/ports` 不得依赖包外 `src.*`） | 无 |
+| P4 `BaseBD2Task` 拆分 | **已完成**：`device_ops_mixin`（设备操作）+ `cartridge_home_mixin`（卡带/主页业务），基类只留状态输出与生命周期 | 无 |
 | P5 表达层收敛 | 核查结论：**已达成**，UI 只经 `task_info_snapshot` 读状态（见 P5 小节实测）；不新增抽象 | 无 |
 
 ### 8.3 本轮发现、需用户决策的问题
