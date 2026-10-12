@@ -1,4 +1,4 @@
-# 架构守卫规则（R1-R7）
+# 架构守卫规则（R1-R8）
 
 > P6「架构守卫」的规则来源与例外台账。执行者是 `tests/test_architecture_layers.py`：它用
 > `ast` 解析 `src/` 的真实 import（`Import` / `ImportFrom` / 相对导入）与 while 守卫，
@@ -36,6 +36,7 @@ src/tasks/task_vision_mixin             → src/tasks/map_trade     （R4）
 src/ports                               → 包外的任何 src.*        （R7）
 基础工具                                 → 组合工具（含环）（R5）
 任何 src/**                              → `while monotonic() <= end_at` 形态（R6）
+src/tasks / src/utils                   → win32api / win32con / win32gui（R8）
 ```
 
 ## 2. 规则编号
@@ -49,6 +50,7 @@ src/ports                               → 包外的任何 src.*        （R7�
 | R5 | 工具层 DAG（方向 + 无环） | 基础工具 → 组合工具；`src/utils` 内部 import 环 | `test_r5_basic_tools_do_not_import_composed_tools`、`test_r5_tool_layer_has_no_import_cycle` |
 | R6 | 统一有界轮询契约 | 比较 `monotonic()` 与截止时间的 while 守卫 | `test_r6_no_unregistered_monotonic_deadline_while_guards` |
 | R7 | 抽象层独立性（端口层不依赖实现） | `src/ports` → 包外 `src.*` | `test_r7_ports_layer_does_not_import_other_src_modules` |
+| R8 | 输入实现收口到适配器（P8） | `src/tasks` / `src/utils` → `win32api` / `win32con` / `win32gui` | `test_r8_tasks_and_utils_do_not_import_win32_modules` |
 
 ## 3. 逐条细则
 
@@ -143,6 +145,22 @@ src/ports                               → 包外的任何 src.*        （R7�
   `TaskSurface`），不会再触发 R2。
 - 现状：0 违规。
 
+### R8 输入适配器收口
+
+`src/tasks/**`、`src/utils/**` 不得直接 import `win32api` / `win32con` /
+`win32gui`（含 `from win32api import SetCursorPos` 与函数内延迟导入）。
+
+- 判定：文件路径位于 `src/tasks/` 或 `src/utils/`，且命中模块为三个 win32 模块或其子模块。
+- 理由：输入实现（拖拽 / 光标定位 / 滚轮）的唯一入口是适配器
+  `src/interaction/BD2Interaction.py`。任务层直接调 win32 会绕过适配器的 `_input_lock`
+  与实现封装，且换输入后端要改任务层（P8 审计证据：`src/tasks/device_ops_mixin.py:229/273`
+  的 `drag_client` / `scroll_client`）。
+- 允许（不在 R8 范围）：`src/interaction/**`（适配器本体）、`src/compat/**`、
+  `src/ui/**`。本规则只约束任务层与工具层，不改变其它层的现状。
+- 修法：把 win32 调用收口进适配器的新公共方法（P8 新增 `BD2Interaction.drag_foreground` /
+  `BD2Interaction.set_foreground_cursor`），任务层只做坐标换算 + 调适配器。
+- 现状：0 违规。
+
 ## 4. 已知例外 EXCEPTIONS
 
 例外登记在 `tests/test_architecture_layers.py::EXCEPTIONS`，每条必须带
@@ -172,7 +190,7 @@ src/ports                               → 包外的任何 src.*        （R7�
 
 ```powershell
 uv run ruff check .
-uv run python -m unittest tests/test_architecture_layers.py -v      # 只跑守卫（17 项）
+uv run python -m unittest tests/test_architecture_layers.py -v      # 只跑守卫（21 项）
 uv run python -m unittest discover -s tests -p "test_*.py"          # 全量
 ```
 
@@ -183,6 +201,14 @@ uv run python -m unittest discover -s tests -p "test_*.py"          # 全量
   - src/ui/common.py:1: from src.utils.image_utils import to_gray
     命中 src.utils.image_utils
   修复方式：调整依赖方向。确属本阶段无法清理的历史违规，必须在 tests/test_architecture_layers.py 的 EXCEPTIONS 登记（规则编号/文件/命中细节/原因/清理计划），并同步 docs/architecture-rules.md。
+```
+
+R8（当前 0 违规）的失败信息同样是三要素，例如：
+
+```text
+[架构守卫] R8 触发 1 处未登记违规 —— 输入适配器收口：src/tasks / src/utils 不得直接 import win32api / win32con / win32gui
+  - src/tasks/_guard_probe_tmp.py:2: import win32api
+    命中 win32api
 ```
 
 R6 的“语句”一栏是守卫本身，附所属函数，例如：
@@ -203,6 +229,11 @@ R6 的“语句”一栏是守卫本身，附所属函数，例如：
      `NonDomainTask → map_trade.models`、`task_vision_mixin → map_trade.vision`、
      `image_utils → task_vision` 等片段，断言每条都被识别、报出正确文件与语句。
    - `test_import_detector_ignores_allowed_directions`：反向确认允许方向的片段不误报。
+   - R8 合成样例：违规侧是 `src/tasks/NewTask.py` 的 `import win32api` 与
+     `src/utils/vision_runtime.py` 的 `from win32con import ...`，另有
+     `test_r8_detector_catches_function_local_win32_import` 覆盖函数内延迟导入；
+     允许侧覆盖 `src/interaction` / `src/compat` / `src/ui` 的 win32 import 不误报。
+     `test_r8_report_contains_rule_file_and_statement` 锁定 R8 的三要素失败信息格式。
    - `test_while_guard_detector_catches_synthetic_violations` /
      `test_while_guard_detector_ignores_state_checks`：R6 只认循环守卫，不误报状态判断。
    - `test_tool_layer_cycle_detector_catches_synthetic_cycle`：构造两模块互相 import，
@@ -217,6 +248,9 @@ R6 的“语句”一栏是守卫本身，附所属函数，例如：
    - `git checkout -- src/ui/common.py` 撤销，再跑一次确认恢复全绿；
    - 追加验证 R6：在 `src/tasks/` 下临时建含 `while monotonic() <= end_at:` 的探针文件，
      确认 R6 失败后删除探针文件。
+   - 追加验证 R8（P8）：在 `src/tasks/` 下临时建含 `import win32api` 的探针文件，
+     确认 `test_r8_tasks_and_utils_do_not_import_win32_modules` 失败并报出
+     「R8 + 文件 + 语句」后删除探针文件，复跑全绿。
 
 ## 7. 基线证据（2026-10-12，基线提交 `16574c6`）
 
@@ -237,11 +271,28 @@ P3 端口收口复跑（2026-10-12，`refactor/ports`，`main` 已含 P4 / P5）
 - 端口层独立性：AST 扫 `src/ports/__init__.py` 只有 `__future__` / `collections.abc` / `typing`
   与 `if TYPE_CHECKING:` 内的 `numpy`，运行时依赖仅 stdlib。
 
+P8 输入适配器收口复跑（2026-10-12，`refactor/input-adapter`，基线 `dc57d0a`）：
+
+- `uv run ruff check .`：通过。
+- `uv run python -m unittest discover -s tests -p "test_*.py"`：1102 项全过（含本守卫 21 项）。
+- 规则扫描结果：R1 = 0、R2 = 0、R3 = 0、R4 = 0、R5 方向 = 0、R5 环 = 0；R6 = 2（在册例外）；
+  R7 = 0；R8 = 0（`src/tasks` / `src/utils` 下 win32 import 归零；`src/interaction` 4 处、
+  `src/ui` 3 处属允许层，见 §8）。
+- 真实反向验证：临时在 `src/tasks/_guard_probe_tmp.py` 写入函数内 `import win32api`，
+  R8 报出「规则编号 + 文件 + 语句」（`src/tasks/_guard_probe_tmp.py:2: import win32api`，
+  命中 `win32api`）；删除探针后复跑全绿（守卫 21 项）。
+- 等价性：`drag_client` / `scroll_client` 里的 win32 语句按原顺序搬进适配器
+  `BD2Interaction.drag_foreground` / `BD2Interaction.set_foreground_cursor`，
+  用 AST 逐条比对为 0 差异（仅 `start_abs` → `start`、`end_abs` → `end` 的参数改名）。
+
 ## 8. 边界：本守卫不检查什么
 
-- 不检查 `src/tasks → src/config` 等 refactor-plan 第 4 节列出但未编号为 R1-R7 的方向。
+- 不检查 `src/tasks → src/config` 等 refactor-plan 第 4 节列出但未编号为 R1-R8 的方向。
 - 不检查 `src/compat`、`src/diagnostics`、`src/globals.py` 等未列层的依赖方向。
 - 不检查运行时动态导入（`importlib`、`__import__`、字符串导入）。
 - 不检查 `tests/`、`scripts/`、`main.py` 的依赖方向。
 - R7 只约束 `src/ports` 自身；它不为其它层新增任何方向限制。
+- R8 只约束 `src/tasks` / `src/utils` 的 win32 import；`src/interaction`（适配器本体）、
+  `src/compat`、`src/ui` 的既有 win32 用法不在 R8 范围内，也不是“例外”，
+  只是本工作包范围之外。
 - 方向规则对所有 import 生效（含函数内/延迟导入）；R5b 环检测同样包含延迟导入。

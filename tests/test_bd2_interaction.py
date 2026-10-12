@@ -1,8 +1,10 @@
 import threading
+import time
 import unittest
 from types import SimpleNamespace
 from unittest.mock import patch
 
+import win32con
 from ok.device.intercation import PostMessageInteraction
 
 from src.interaction.BD2Interaction import (
@@ -83,6 +85,99 @@ class BD2InteractionOperateTest(unittest.TestCase):
         self.assertFalse(interaction._operating)
         get_cursor_pos.assert_called_once_with()
         self.assertEqual(1, calls.count("restore_cursor"))
+
+
+class BD2InteractionForegroundInputTest(unittest.TestCase):
+    """P8：前景输入（拖拽 / 绝对光标定位）实现收口在适配器里。"""
+
+    def test_drag_foreground_positions_cursor_presses_steps_and_releases(self):
+        interaction, _calls = make_interaction()
+        timeline = []
+
+        with (
+            patch(
+                "src.interaction.BD2Interaction.win32api.SetCursorPos",
+                side_effect=lambda point: timeline.append(("cursor", point)),
+            ),
+            patch(
+                "src.interaction.BD2Interaction.win32api.mouse_event",
+                side_effect=lambda *args: timeline.append(("mouse", args[0])),
+            ),
+            patch(
+                "src.interaction.BD2Interaction.time.sleep",
+                side_effect=lambda seconds: timeline.append(("sleep", seconds)),
+            ),
+        ):
+            interaction.drag_foreground((100, 200), (160, 260), duration=0.09)
+
+        steps = [("cursor", (100 + 10 * index, 200 + 10 * index)) for index in range(1, 7)]
+        expected = [("cursor", (100, 200)), ("sleep", 0.03)]
+        expected.append(("mouse", win32con.MOUSEEVENTF_LEFTDOWN))
+        for entry in steps:
+            expected.extend([entry, ("sleep", 0.015)])
+        expected.append(("mouse", win32con.MOUSEEVENTF_LEFTUP))
+        self.assertEqual(expected, timeline)
+
+    def test_drag_foreground_releases_button_when_cursor_move_fails(self):
+        interaction, _calls = make_interaction()
+        events = []
+        cursor_calls = []
+
+        def set_cursor_pos(point):
+            cursor_calls.append(point)
+            events.append(("cursor", point))
+            if len(cursor_calls) == 3:
+                raise RuntimeError("cursor move failed")
+
+        with (
+            patch(
+                "src.interaction.BD2Interaction.win32api.SetCursorPos",
+                side_effect=set_cursor_pos,
+            ),
+            patch(
+                "src.interaction.BD2Interaction.win32api.mouse_event",
+                side_effect=lambda *args: events.append(("mouse", args[0])),
+            ),
+            patch("src.interaction.BD2Interaction.time.sleep"),
+        ):
+            with self.assertRaises(RuntimeError):
+                interaction.drag_foreground((0, 0), (60, 0), duration=0.09)
+
+        self.assertEqual(("cursor", (0, 0)), events[0])
+        self.assertEqual(("mouse", win32con.MOUSEEVENTF_LEFTDOWN), events[1])
+        self.assertEqual(("mouse", win32con.MOUSEEVENTF_LEFTUP), events[-1])
+
+    def test_set_foreground_cursor_positions_the_real_cursor(self):
+        interaction, _calls = make_interaction()
+
+        with patch(
+            "src.interaction.BD2Interaction.win32api.SetCursorPos",
+        ) as set_cursor_pos:
+            interaction.set_foreground_cursor((1234, 567))
+
+        set_cursor_pos.assert_called_once_with((1234, 567))
+
+    def test_foreground_input_methods_take_the_input_lock(self):
+        interaction, _calls = make_interaction()
+        started = threading.Event()
+
+        def worker():
+            started.set()
+            interaction.set_foreground_cursor((1234, 567))
+
+        with patch(
+            "src.interaction.BD2Interaction.win32api.SetCursorPos",
+        ) as set_cursor_pos:
+            with interaction._input_lock:
+                thread = threading.Thread(target=worker)
+                thread.start()
+                self.assertTrue(started.wait(1.0))
+                time.sleep(0.05)
+                set_cursor_pos.assert_not_called()
+            thread.join(1.0)
+
+        self.assertFalse(thread.is_alive())
+        set_cursor_pos.assert_called_once_with((1234, 567))
 
 
 class BD2InteractionClickModeTest(unittest.TestCase):

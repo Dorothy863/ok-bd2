@@ -200,6 +200,46 @@ class BD2Interaction(PostMessageInteraction):
         with self._input_lock:
             return super().mouse_up(key=key)
 
+    def drag_foreground(
+        self,
+        start: tuple[int, int],
+        end: tuple[int, int],
+        duration: float = 0.7,
+    ) -> None:
+        """前景拖拽：按住左键把系统光标从 ``start`` 分步移到 ``end``。
+
+        参数是绝对屏幕坐标。“前景输入”指必须占用真实系统光标与真实鼠标按键的
+        输入方式（``SetCursorPos`` + ``mouse_event``），与后台 ``PostMessage``
+        路线相对；因此调用方必须先保证游戏窗口已在前台（本模块的 ``try_activate``），
+        并把调用整体包在 ``operate(..., restore_cursor=True)`` 里，由 ``operate``
+        负责结束后恢复原光标位置——本方法只做“定位 + 按住 + 分步移动 + 松开”，
+        不保存/恢复光标。
+        """
+        with self._input_lock:
+            steps = max(6, round(duration / 0.03))
+            win32api.SetCursorPos(start)
+            time.sleep(0.03)
+            win32api.mouse_event(win32con.MOUSEEVENTF_LEFTDOWN, 0, 0, 0, 0)
+            try:
+                for index in range(1, steps + 1):
+                    ratio = index / steps
+                    x = round(start[0] + (end[0] - start[0]) * ratio)
+                    y = round(start[1] + (end[1] - start[1]) * ratio)
+                    win32api.SetCursorPos((x, y))
+                    time.sleep(duration / steps)
+            finally:
+                win32api.mouse_event(win32con.MOUSEEVENTF_LEFTUP, 0, 0, 0, 0)
+
+    def set_foreground_cursor(self, point: tuple[int, int]) -> None:
+        """把系统光标定位到绝对屏幕坐标 ``point``（前景输入前的光标定位）。
+
+        “前景输入”语义同 :meth:`drag_foreground`：移动的是真实系统光标，所以调用
+        方必须保证窗口已在前台，并在 ``operate(..., restore_cursor=True)`` 内调用，
+        结束后由 ``operate`` 恢复原光标位置。
+        """
+        with self._input_lock:
+            win32api.SetCursorPos(point)
+
     def _restore_cursor(self):
         time.sleep(0.025)
         try:
