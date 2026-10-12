@@ -9,7 +9,6 @@ from time import monotonic
 import cv2
 import numpy as np
 
-from src.tasks.map_trade.models import TemplateSpec
 from src.tasks.task_vision_mixin import (
     REFERENCE_HEIGHT,
     REFERENCE_WIDTH,
@@ -17,6 +16,7 @@ from src.tasks.task_vision_mixin import (
 )
 from src.utils.home_confirmation import HOME_LEFT_COLUMN_REQUIRED_HITS
 from src.utils.polling import PollDeadline
+from src.utils.vision_models import TemplateSpec
 
 QUICK_HUNT_CHILD_CONFIG_KEYS = (
     "快速狩猎冒险航线",

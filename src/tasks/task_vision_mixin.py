@@ -8,8 +8,6 @@ from time import monotonic
 import cv2
 import numpy as np
 
-from src.tasks.map_trade.models import MatchResult, TemplateSpec
-from src.tasks.map_trade.vision import Vision
 from src.utils import task_vision
 from src.utils.calibration import FHD_1080
 from src.utils.home_confirmation import (
@@ -25,6 +23,8 @@ from src.utils.home_confirmation import (
 from src.utils.image_utils import to_gray
 from src.utils.ocr_utils import keyword_match_count, normalize_ocr_text
 from src.utils.polling import PollDeadline
+from src.utils.vision_models import MatchResult, TemplateSpec
+from src.utils.vision_runtime import Vision
 
 REFERENCE_WIDTH = FHD_1080.width
 

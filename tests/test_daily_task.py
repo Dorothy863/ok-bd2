@@ -19,7 +19,6 @@ from src.tasks.DailyTask import (
     MY_HOME_TEMPLATE,
     DailyTask,
 )
-from src.tasks.map_trade.models import MatchResult
 from src.tasks.quick_hunt import (
     QUICK_HUNT_ADVENTURE_LABEL_PATTERNS,
     QUICK_HUNT_ADVENTURE_LIST_ROI,
@@ -51,6 +50,7 @@ from src.tasks.task_vision_mixin import (
     REFERENCE_WIDTH,
 )
 from src.utils.image_utils import crop_relative
+from src.utils.vision_models import MatchResult
 
 
 class DailyTaskHelperTest(unittest.TestCase):
