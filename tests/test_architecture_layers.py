@@ -1,4 +1,4 @@
-"""架构守卫：用 AST 扫描 src/ 的真实 import 与 while 守卫，断言分层规则 R1-R7。
+"""架构守卫：用 AST 扫描 src/ 的真实 import 与 while 守卫，断言分层规则 R1-R8。
 
 规则定义、允许/禁止方向、已知例外与清理计划见 docs/architecture-rules.md；
 本文件里的规则编号必须与文档保持一致。
@@ -49,6 +49,13 @@ TASK_VISION_MIXIN = "src/tasks/task_vision_mixin.py"
 PORTS_PACKAGE = "src/ports"
 PORTS_MODULE = "src.ports"
 
+# R8 输入适配器收口：任务层 / 工具层不得直接调用 Windows 输入与窗口 API，
+# 输入实现的唯一入口是适配器 src/interaction（BD2Interaction）。
+WIN32_MODULES = ("win32api", "win32con", "win32gui")
+WIN32_FORBIDDEN_PACKAGES = ("src/tasks", "src/utils")
+# 允许保留 win32 用法的包（不在本工作包范围内，R8 不约束它们）：
+# src/interaction（适配器本体）、src/compat、src/ui。
+
 TOOL_PACKAGE = "src/utils"
 # R5 基础工具：只允许被组合工具依赖。
 R5_BASIC_TOOLS = (
@@ -73,6 +80,7 @@ RULES: dict[str, str] = {
     "R5": "工具层 DAG：基础工具不得反向依赖组合工具，src/utils 内部不得出现 import 环",
     "R6": "轮询契约：不得再写比较 monotonic() 与截止时间的 while 守卫，统一用 PollDeadline",
     "R7": "抽象层独立性：src/ports 不得 import 包外的 src.* 模块",
+    "R8": "输入适配器收口：src/tasks / src/utils 不得直接 import win32api / win32con / win32gui",
 }
 
 
@@ -363,6 +371,20 @@ def matches_r7(edge: ImportEdge) -> bool:
     return not _targets(edge.target, PORTS_MODULE)
 
 
+def matches_r8(edge: ImportEdge) -> bool:
+    """R8：``src/tasks`` / ``src/utils`` 不得直接 import win32 输入 / 窗口 API。
+
+    前景输入（拖拽、光标定位、滚轮）的实现只允许放在适配器 ``src/interaction`` 里，
+    任务层与工具层只能通过适配器调用，避免绕过适配器的 ``_input_lock`` 与实现封装
+    （换输入后端时不必改任务层）。``src/compat`` / ``src/ui`` 的既有 win32
+    用法不在本规则范围内。
+    """
+
+    if not any(_in_package(edge.path, package) for package in WIN32_FORBIDDEN_PACKAGES):
+        return False
+    return any(_targets(edge.target, module) for module in WIN32_MODULES)
+
+
 IMPORT_RULES = {
     "R1": matches_r1,
     "R2": matches_r2,
@@ -370,6 +392,7 @@ IMPORT_RULES = {
     "R4": matches_r4,
     "R5": matches_r5,
     "R7": matches_r7,
+    "R8": matches_r8,
 }
 
 
@@ -546,6 +569,30 @@ class ArchitectureLayerGuardTest(unittest.TestCase):
     def test_r7_ports_layer_does_not_import_other_src_modules(self) -> None:
         self.assert_no_unregistered("R7", rule_violations("R7", self.imports))
 
+    def test_r8_tasks_and_utils_do_not_import_win32_modules(self) -> None:
+        self.assert_no_unregistered("R8", rule_violations("R8", self.imports))
+
+    def test_r8_detector_catches_function_local_win32_import(self) -> None:
+        """R8 也覆盖函数内延迟导入（基线 ``drag_client`` 的写法就是函数内 import）。"""
+
+        source = "def action():\n    import win32gui\n"
+        violations = rule_violations(
+            "R8",
+            parse_imports("src/tasks/NewTask.py", "src.tasks.NewTask", source),
+        )
+        self.assertEqual(1, len(violations))
+        self.assertEqual("import win32gui", violations[0].statement)
+        self.assertEqual("win32gui", violations[0].detail)
+
+    def test_r8_report_contains_rule_file_and_statement(self) -> None:
+        """R8 失败信息沿用三要素格式：规则编号 + 文件（相对路径）+ 语句。"""
+
+        edges = parse_imports("src/tasks/NewTask.py", "src.tasks.NewTask", "import win32api\n")
+        report = format_report("R8", rule_violations("R8", edges))
+        self.assertIn("R8 触发 1 处未登记违规", report)
+        self.assertIn("src/tasks/NewTask.py:1: import win32api", report)
+        self.assertIn("命中 win32api", report)
+
     # ---- 例外登记：不许假绿，也不许留过期条目 ----
 
     def test_every_exception_still_covers_a_real_violation(self) -> None:
@@ -668,6 +715,20 @@ class ArchitectureLayerGuardTest(unittest.TestCase):
                 "from ..tasks import task_vision_mixin\n",
                 "src.tasks",
             ),
+            (
+                "R8",
+                "src/tasks/NewTask.py",
+                "src.tasks.NewTask",
+                "import win32api\n",
+                "win32api",
+            ),
+            (
+                "R8",
+                "src/utils/vision_runtime.py",
+                "src.utils.vision_runtime",
+                "from win32con import WM_LBUTTONDOWN\n",
+                "win32con",
+            ),
         )
         for rule, path, module, source, detail in samples:
             with self.subTest(rule=rule, source=source.strip()):
@@ -739,6 +800,24 @@ class ArchitectureLayerGuardTest(unittest.TestCase):
                 "src/utils/vision_runtime.py",
                 "src.utils.vision_runtime",
                 "from src.ports import TaskSurface\n",
+            ),
+            (
+                "R8",
+                "src/interaction/BD2Interaction.py",
+                "src.interaction.BD2Interaction",
+                "import win32gui\n",
+            ),
+            (
+                "R8",
+                "src/compat/windows_graphics.py",
+                "src.compat.windows_graphics",
+                "from win32api import GetCursorPos\n",
+            ),
+            (
+                "R8",
+                "src/ui/manual_resolution.py",
+                "src.ui.manual_resolution",
+                "from win32con import SW_RESTORE\n",
             ),
         )
         for rule, path, module, source in samples:
