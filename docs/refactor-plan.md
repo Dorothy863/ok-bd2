@@ -274,6 +274,21 @@ BaseBD2Task 不再新增 OCR 关键词分支
 现有任务无需大规模改写
 ```
 
+### P5 表达层接口收敛（核查结论：已达成，无需新增抽象）
+
+主 Agent 实测（2026-10-12，合并 P1/P2/P6 后）：
+
+- `src/ui → src/utils` / `src/interaction` / `src/scene`：**0 处**（守卫 R1 = 0）。
+- UI 读取任务状态**已经**统一走 `src/tasks/BaseBD2Task.task_info_snapshot(task)`；
+  AST 扫描 `src/ui` 中 13 处 `.info` 全部是 `logger.info(...)`，
+  对任务状态字段的直读为 **0 处**，`getattr(..., "info")` 亦为 0 处。
+- 因此 P5 计划里“定义只读状态接口或 adapter”**已经由 `task_info_snapshot` 承担**，
+  不再新增一层接口模块（避免为抽象而抽象）。
+
+结论：P5 不派发子 Agent，仅保留守卫 R1 与本节记录作为回归依据。
+
+#### 原始计划文本（保留备查）
+
 ### P5 表达层接口收敛
 
 **问题**：UI 直接依赖具体任务类和状态字段。
@@ -319,6 +334,8 @@ uv run python -m unittest discover -s tests -p "test_*.py"
 
 主 Agent 在每个合并点执行真实验证：
 
+0. 工具：`uv run python scripts/verify_auto_return.py identify`（只识别当前页面，不点击）；
+   `... return`（识别 → 自动返回主页 → 复验并打印 before/after 与信号）。
 1. 主页识别。
 2. 抽卡详情自动关闭并返回主页。
 3. 一键日常逐模块“执行前自动返回主页”开关。
@@ -358,10 +375,10 @@ uv run python -m unittest discover -s tests -p "test_*.py"
 
 | 项 | 内容 | 阻塞 |
 | --- | --- | --- |
-| P7 实机验收 | 主页识别 / 抽卡详情关闭返回主页 / 一键日常逐模块「执行前自动返回主页」开关 | 需要游戏客户端在跑且用户在场 |
+| P7 实机验收 | 主页识别 / 抽卡详情关闭返回主页 / 一键日常逐模块「执行前自动返回主页」开关 | 需要游戏客户端在跑且用户在场；已备好 `scripts/verify_auto_return.py` |
 | P3 端口抽象 | `src/tasks/ports.py`（CapturePort/OcrPort/TemplatePort/InputPort/ProgressPort） | 未开工 |
 | P4 `BaseBD2Task` 拆分 | 工具操作 / 页面业务 / 状态输出三分离 | 未开工（P2 已把页面识别搬出） |
-| P5 表达层收敛 | UI 经状态接口读取 `task.info`，不直接摸任务字段 | 未开工 |
+| P5 表达层收敛 | 核查结论：**已达成**，UI 只经 `task_info_snapshot` 读状态（见 P5 小节实测）；不新增抽象 | 无 |
 
 ### 8.3 本轮发现、需用户决策的问题
 
