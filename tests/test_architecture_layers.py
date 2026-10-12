@@ -1,4 +1,4 @@
-"""架构守卫：用 AST 扫描 src/ 的真实 import 与 while 守卫，断言分层规则 R1-R6。
+"""架构守卫：用 AST 扫描 src/ 的真实 import 与 while 守卫，断言分层规则 R1-R7。
 
 规则定义、允许/禁止方向、已知例外与清理计划见 docs/architecture-rules.md；
 本文件里的规则编号必须与文档保持一致。
@@ -45,6 +45,10 @@ MAP_TRADE_DOMAIN_ENTRIES = (
 
 TASK_VISION_MIXIN = "src/tasks/task_vision_mixin.py"
 
+# R7 抽象层：端口包只允许包内相对导入，不得依赖仓库内任何其它模块。
+PORTS_PACKAGE = "src/ports"
+PORTS_MODULE = "src.ports"
+
 TOOL_PACKAGE = "src/utils"
 # R5 基础工具：只允许被组合工具依赖。
 R5_BASIC_TOOLS = (
@@ -68,6 +72,7 @@ RULES: dict[str, str] = {
     "R4": "公共基座隔离：src/tasks/task_vision_mixin.py 不得 import src.tasks.map_trade",
     "R5": "工具层 DAG：基础工具不得反向依赖组合工具，src/utils 内部不得出现 import 环",
     "R6": "轮询契约：不得再写比较 monotonic() 与截止时间的 while 守卫，统一用 PollDeadline",
+    "R7": "抽象层独立性：src/ports 不得 import 包外的 src.* 模块",
 }
 
 
@@ -344,12 +349,27 @@ def matches_r5(edge: ImportEdge) -> bool:
     return edge.module in R5_BASIC_TOOLS and _targets_any(edge.target, R5_COMPOSED_TOOLS)
 
 
+def matches_r7(edge: ImportEdge) -> bool:
+    """R7：``src/ports`` 是纯抽象层，不得 import 包外的 ``src.*`` 模块。
+
+    ``src/ports`` 内部的相对导入（例如 ``from .surface import TaskSurface``）解析为
+    ``src.ports.*``，属于包内协作，不算违规。
+    """
+
+    if not _in_package(edge.path, PORTS_PACKAGE):
+        return False
+    if not _targets(edge.target, "src"):
+        return False
+    return not _targets(edge.target, PORTS_MODULE)
+
+
 IMPORT_RULES = {
     "R1": matches_r1,
     "R2": matches_r2,
     "R3": matches_r3,
     "R4": matches_r4,
     "R5": matches_r5,
+    "R7": matches_r7,
 }
 
 
@@ -523,6 +543,9 @@ class ArchitectureLayerGuardTest(unittest.TestCase):
     def test_r6_no_unregistered_monotonic_deadline_while_guards(self) -> None:
         self.assert_no_unregistered("R6", r6_violations(self.guards))
 
+    def test_r7_ports_layer_does_not_import_other_src_modules(self) -> None:
+        self.assert_no_unregistered("R7", rule_violations("R7", self.imports))
+
     # ---- 例外登记：不许假绿，也不许留过期条目 ----
 
     def test_every_exception_still_covers_a_real_violation(self) -> None:
@@ -562,6 +585,7 @@ class ArchitectureLayerGuardTest(unittest.TestCase):
             "src/ui/quest_ui.py",
             "src/tasks/DailyTask.py",
             "src/utils/task_vision.py",
+            "src/ports/__init__.py",
         ):
             with self.subTest(path=expected):
                 self.assertIn(expected, scanned)
@@ -630,6 +654,20 @@ class ArchitectureLayerGuardTest(unittest.TestCase):
                 "from src.utils import task_vision\n",
                 "src.utils.task_vision",
             ),
+            (
+                "R7",
+                "src/ports/__init__.py",
+                "src.ports",
+                "from src.utils.polling import PollDeadline\n",
+                "src.utils.polling",
+            ),
+            (
+                "R7",
+                "src/ports/surface.py",
+                "src.ports.surface",
+                "from ..tasks import task_vision_mixin\n",
+                "src.tasks",
+            ),
         )
         for rule, path, module, source, detail in samples:
             with self.subTest(rule=rule, source=source.strip()):
@@ -683,6 +721,24 @@ class ArchitectureLayerGuardTest(unittest.TestCase):
                 "src/utils/task_vision.py",
                 "src.utils.task_vision",
                 "from src.utils.image_utils import to_gray\n",
+            ),
+            (
+                "R7",
+                "src/ports/__init__.py",
+                "src.ports",
+                "from typing import Protocol\n",
+            ),
+            (
+                "R7",
+                "src/ports/__init__.py",
+                "src.ports",
+                "from .surface import TaskSurface\n",
+            ),
+            (
+                "R7",
+                "src/utils/vision_runtime.py",
+                "src.utils.vision_runtime",
+                "from src.ports import TaskSurface\n",
             ),
         )
         for rule, path, module, source in samples:
