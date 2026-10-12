@@ -645,3 +645,16 @@ R6 仅 2 条语义正确的在册例外。
   严格比较、实机恒不命中（历史语义，本轮按「不改行为」保留，需独立工作包决策）；
   `src/compat/windows_graphics.py` 零超时探测遵循上游契约；`map_trade/vision.py`
   为 re-export 薄壳，领域侧 17 处导入可后续替换。
+
+### 7.6 后续工作包（第二批）
+
+| 工作包 | 分支 | worktree | 写入范围 |
+| --- | --- | --- | --- |
+| P3 端口抽象 | `refactor/ports` | `D:\\workspace\\ok-bd2-ports` | `src/tasks/ports.py`、`src/utils/vision_runtime.py`、`src/tasks/task_vision_mixin.py`、`tests/test_ports.py` |
+| P4 `BaseBD2Task` 拆分 | `refactor/base-task-split` | `D:\\workspace\\ok-bd2-split` | `src/tasks/BaseBD2Task.py` + 新建 mixin 模块 + 相关测试 |
+
+P5（表达层收敛）经实测判定**已达成**，不派發：UI 只经 `task_info_snapshot` 读状态，
+且 `src/ui` 对 utils/interaction/scene 的依赖为 0（守卫 R1 = 0）。
+
+P7 实机验收新增工具 `scripts/verify_auto_return.py`（`identify` / `return` 两种模式），
+用于在你启动客户端后一次性产出「识别前页面 → 自动返回 → 识别后页面」的证据。
