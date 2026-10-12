@@ -381,11 +381,28 @@ uv run python -m unittest discover -s tests -p "test_*.py"
 | --- | --- | --- |
 | P7 实机验收 | 主页识别 / 抽卡详情关闭返回主页 / 一键日常逐模块「执行前自动返回主页」开关 | 需要游戏客户端在跑且用户在场；已备好 `scripts/verify_auto_return.py` |
 | P3 端口抽象 | **已完成**：`src/ports/` 唯一定义 + R7 守卫（`src/ports` 不得依赖包外 `src.*`） | 无 |
-| P8 输入适配器收口 | **进行中**（`refactor/input-adapter`）：`drag_client` / `scroll_client` 直调 `win32api` 属适配器旁路，收口进 `BD2Interaction` + 新增守卫 R8 | 无（结构搬迁） |
+| P8 输入适配器收口 | **已完成**（`refactor/input-adapter`）：前景拖拽与绝对光标定位收口进 `BD2Interaction.drag_foreground` / `set_foreground_cursor`；新增守卫 R8 | 无 |
 | P4 `BaseBD2Task` 拆分 | **已完成**：`device_ops_mixin`（设备操作）+ `cartridge_home_mixin`（卡带/主页业务），基类只留状态输出与生命周期 | 无 |
 | P5 表达层收敛 | 核查结论：**已达成**，UI 只经 `task_info_snapshot` 读状态（见 P5 小节实测）；不新增抽象 | 无 |
 
 ### 8.3 审计发现与决策记录
+
+**P8 复核要点（主 Agent 独立验证）**
+
+- 逐行 diff 原始 `drag_client.action` 与新的任务层 + `BD2Interaction.drag_foreground`：
+  `steps = max(6, round(duration / 0.03))`、`SetCursorPos` → `sleep(0.03)` →
+  `LEFTDOWN` → `for` 分步 `SetCursorPos` + `sleep(duration / steps)` → `finally LEFTUP`
+  **整块语句与顺序一致**；`operate(action, block=True, restore_cursor=True)` 与
+  `sleep(after_sleep)` 逐字未变。
+- `_input_lock` 是 `threading.RLock`，且 `BD2Interaction.operate` 本就持该锁，
+  因此适配器内新增的 `with self._input_lock` 是**可重入的同把锁**，未引入新锁语义。
+- 我自行在 `src/tasks/` 注入函数级 `import win32api` 探针，确认 R8 报出
+  规则编号 + 文件 + 行号 + 语句后删除探针复原。
+- 已知（且刻意保留的）唯一差异：`executor.interaction is None` 时旧实现会退化成
+  裸 win32 拖拽（客户端坐标当屏幕坐标，本身是错误路径），新实现直接抛
+  `AttributeError`。生产路径与测试均不覆盖该分支，按「不加兜底」保留。
+- 实机未验证部分：真实 `SetCursorPos`/`mouse_event` 前景拖拽手感与光标恢复时序、
+  滚轮定位在真实分辨率下的表现——需要在 P7 实机验收时顺带跑一次 PVP / 广场的拖动。
 
 **已决策（本轮主 Agent 实测结论）**
 

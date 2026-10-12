@@ -705,3 +705,21 @@ P7 实机验收新增工具 `scripts/verify_auto_return.py`（`identify` / `retu
 另：右上角「H/房子」分支经实测为**死代码**（`normalize_ocr_text("H") == "h"` 却与
 字面量 `"H"` 比较），实际回主页依赖左上角返回 ROI 模板匹配。是否启用该分支需用户决策
 并配套实机验证。
+
+### 7.9 P8 输入适配器收口（已合并）
+
+| 合并点 | 提交 | 复核结果 |
+| --- | --- | --- |
+| P8 输入适配器收口 | `e2d81cb` / `b83af85` + 合并提交 | ruff 通过；1102 项全过；守卫 21 项（新增 R8）通过 |
+
+- 问题：`device_ops_mixin` 的 `drag_client` / `scroll_client` 直接 `import win32api`
+  并手搝 `SetCursorPos` / `mouse_event`，绕过 `BD2Interaction` 的输入适配器。
+- 收口：新增 `BD2Interaction.drag_foreground` / `set_foreground_cursor`（迁入原语句，
+  持 `_input_lock`），任务层只做坐标换算与调用；新增守卫 R8
+  （`src/tasks` / `src/utils` 不得直接 import `win32api`/`win32con`/`win32gui`）。
+- 主 Agent 独立验证：逐行 diff 确认搬迁语句与顺序一致；确认 `_input_lock` 为 RLock 且
+  `operate` 已持锁（可重入，无新语义）；自行注入 R8 违规验证守卫非假绿。
+- 唯一刻意保留的行为差异：`interaction is None` 时旧实现退化为裸 win32 拖拽（错误路径），
+  新实现抛 `AttributeError`；生产路径不覆盖。
+- 遗留（结合 P7）：真实前景拖拽手感、光标恢复时序、滚轮定位表现需实机验证。
+
