@@ -397,9 +397,10 @@ class BaseBD2Task(BaseTask):
             return is_home, has_house_hint
         for box in boxes:
             name = str(getattr(box, "name", "") or "")
-            if "抽抽乐" in name:
+            normalized_name = normalize_ocr_text(name).strip()
+            if normalized_name == "抽抽乐":
                 is_home = True
-            if name == "H":
+            if normalized_name == "H":
                 try:
                     x, y, w, h = int(box.x), int(box.y), int(box.width), int(box.height)
                 except Exception:

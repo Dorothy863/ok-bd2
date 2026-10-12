@@ -26,6 +26,28 @@ class AutoReturnMainHomeTest(unittest.TestCase):
         task.operate_click = lambda x, y, **kwargs: clicks.append((x, y, kwargs))
         return task, clicks
 
+    def test_home_scan_does_not_treat_gacha_detail_labels_as_home(self):
+        task = object.__new__(BaseBD2Task)
+        task.ocr = lambda **_kwargs: [
+            _Box("抽抽乐点数", 211, 1337, 138, 34),
+            _Box("付费抽抽乐", 1605, 1294, 152, 37),
+            _Box("抽1次：", 1941, 1292, 123, 45),
+        ]
+
+        self.assertEqual(
+            (False, False),
+            BaseBD2Task._home_scan(task, np.zeros((1440, 2560, 3), dtype=np.uint8)),
+        )
+
+    def test_home_scan_accepts_exact_gacha_home_label(self):
+        task = object.__new__(BaseBD2Task)
+        task.ocr = lambda **_kwargs: [_Box("抽抽乐", 171, 1342, 88, 37)]
+
+        self.assertEqual(
+            (True, False),
+            BaseBD2Task._home_scan(task, np.zeros((1440, 2560, 3), dtype=np.uint8)),
+        )
+
     def test_gacha_detail_close_clicks_ocr_x_center(self):
         boxes = [
             _Box("抽抽乐点数", 211, 1337, 138, 34),
