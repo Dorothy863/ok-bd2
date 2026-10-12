@@ -60,6 +60,27 @@ Frame → ROI → OCR/Template → Evidence → PageId → Action Decision
 3. `BaseBD2Task` 同时承担工具操作、页面业务和状态输出。
 4. 表达层方向基本正确，但直接依赖具体任务类，缺少状态读取接口。
 
+## 3.1 依赖审计复核（主 Agent 实测，2026-10-12）
+
+用 AST 扫描 `src/` 实际 import 复核，结论：
+
+1. 跨层违规：**无**。
+   - `src/ui` 未引用 `src/utils` / `src/interaction` / `src/scene`。
+   - `src/utils` / `src/interaction` / `src/scene` 未反向引用 `src/tasks` / `src/ui`。
+2. 公共任务依赖 `map_trade.models`（待 P1 清理）：
+   `DailyTask` / `FreeGachaTask` / `PVPTask` / `SquareGoddessTask` /
+   `tasks/quick_hunt.py` / `trigger/AutoLoginTask` / `task_vision_mixin`。
+   `MapTradeTask` / `MapCollectionTask` / `BD2MapCollectionProbeTask` 引用
+   `map_trade.*` 属领域入口，不在清理范围。
+3. `task_vision_mixin` 依赖 `map_trade.vision.Vision`（待 P1 下沉），
+   这是"公共业务依赖具体领域"的最大单点。
+4. 工具层内部有向无环依赖（可接受）：
+   `cartridge_quick_switch → image_utils`；`home_confirmation → ocr_utils / image_utils`；
+   `task_vision → vision_models / template_resolution`。
+5. `src/tasks/map_trade/models.py` 已经把 `MatchResult` / `TemplateSpec`
+   从 `src.utils.vision_models` re-export，公共模型唯一来源已是 `src.utils.vision_models`；
+   P1 主要是改导入点，并把 `Vision` 移出 `map_trade`。
+
 ## 4. 依赖规则
 
 ### 允许
@@ -95,6 +116,15 @@ src/tasks/task_vision_mixin → src/tasks/map_trade
 
 禁止组合工具被基础工具反向导入，禁止循环依赖。
 
+### 新增契约（2026-10-12）
+
+```text
+所有有界轮询 → PollDeadline（src/utils/polling.py）
+禁止：while monotonic() <= end_at / while monotonic() < end_at
+循环体尾部收尾检查 → deadline.expired()（纯判断）
+零等待语义 → 至少采样一次（poll_expired）
+```
+
 ## 5. 阶段与工作包
 
 ### P0 基线保护
@@ -102,6 +132,33 @@ src/tasks/task_vision_mixin → src/tasks/map_trade
 - 创建 `pre-refactor-20261012` branch/tag。
 - 每个工作包独立分支、独立提交。
 - 主 Agent 合并前运行全量测试与架构守卫。
+
+### P0.5 基线绿化（已完成）
+
+进入重构前必须先有绿色基线，否则无法判定回归。
+
+事实核查（2026-10-12，Python 3.14.7）：
+
+1. Python 3.14 把 Windows 上 `time.monotonic()` 的分辨率从 15.6ms 提升到 ~100ns，
+   于是 `while monotonic() <= end_at` 在超时为 0 时一次都不进入循环体（旧版本靠
+   粗粒度时钟恰好落在同一 tick 才"侥幸"执行一次）。全量测试暴露 15 项失败。
+2. 处理方式：新增 `src/utils/polling.py::PollDeadline`，把"零等待也要采样一次"
+   显式化；其余情况与 `monotonic() <= end_at` 的迭代次数、时钟读取次数完全一致。
+   `clock` 由调用方传入自己模块的 `monotonic`，保留 `patch("<task module>.monotonic")`
+   这一既有时间夹具。
+3. **契约**：新增的有界轮询一律使用 `PollDeadline`；禁止再写
+   `while monotonic() <= end_at` / `while monotonic() < end_at`。
+   循环体尾部（`while True` + 收尾判断）的截止检查用纯 `deadline.expired()`，
+   不要用带零等待放行的 `poll_expired()`。
+4. 已知例外：`src/compat/windows_graphics.py::_capture_can_produce_visible_frame`
+   仍是"零超时=不探测"。它是注入给上游 `ok` 库的钩子，超时由库侧决定，本次不动。
+5. 同时修复：`BaseBD2Task._click_top_left_back` 原先直接 `cv2.matchTemplate`，
+   改走同文件已在用的 `template_match_response`（集中式匹配，已有守卫测试）。
+6. 同时回退：`SquareGoddessTask._click_fantasia_square_card` 的小卡面 OCR 搜索，
+   恢复"生活玩法游戏卡带 → 固定第二格 → 确认梦幻广场"单一路径（第三轮 review 结论）。
+
+基线证据：`uv run ruff check .` 通过；`uv run python -m unittest discover -s tests -p "test_*.py"`
+1034 项全过（修复前 15 项失败）。
 
 ### P1 公共视觉模型下沉
 
