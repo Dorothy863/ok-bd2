@@ -110,8 +110,8 @@ src/tasks/task_vision_mixin → src/tasks/map_trade
 工具层内部允许有向无环的 DAG，但只允许从基础工具指向组合工具：
 
 ```text
-基础工具：vision_models / image_utils / ocr_utils / template_resolution
-组合工具：task_vision / home_confirmation / cartridge_quick_switch
+基础工具：vision_models / image_utils / ocr_utils / template_resolution / polling
+组合工具：task_vision / home_confirmation / cartridge_quick_switch / vision_runtime
 ```
 
 禁止组合工具被基础工具反向导入，禁止循环依赖。
@@ -338,3 +338,39 @@ uv run python -m unittest discover -s tests -p "test_*.py"
 - 风险：BaseBD2Task 拆分改变任务行为。回滚：保留旧方法作为兼容 wrapper。
 - 风险：子 Agent 并行冲突。控制：各自独立分支和写入范围；主 Agent 按顺序合并且每次运行全量测试。
 - 回滚点：`pre-refactor-20261012` tag/branch。
+
+---
+
+## 8. 进展与遗留（滚动更新）
+
+### 8.1 已完成并合并到 `main`
+
+| 工作包 | 分支 | 提交 | 主 Agent 复核结论 |
+| --- | --- | --- | --- |
+| P0.5 基线绿化 | 直接提交 `main` | `80000b9` / `387dd72` / `16574c6` | ruff 通过；1034 项全过（此前 15 项失败） |
+| P1 公共视觉模型下沉 | `refactor/vision-models` | `2ecb360` / `ed3ed02` / `71b8cfb` | 独立 AST 审计：非领域任务 → map_trade 归零；`task_vision_mixin` 无 map_trade 依赖；`Vision` 迁移 diff 仅 4 处（docstring/import/`parents[3]→[2]`/`MAP_TRADE_REFERENCE→HD_720`，同值同对象）；ruff + 1034 项全过 |
+| P2 页面识别服务 | `refactor/page-recognition` | `2314a46` / `232f536` | 逐行核对判定规则与原实现等价（精确等值、关键词子串、区域闭区间、优先级 HOME > GACHA_DETAIL > UNKNOWN）；写入范围仅 4 文件；ruff + 1056 项全过 |
+| P6 架构守卫 | `test/architecture-guard` | `fc8fc32` / `bb0f363` | 我自行注入 R1/R6 违规验证守卫**非假绿**（报出规则编号+文件+行号+语句）后复原；P1 合并后删除 9 条过期例外；ruff + 1073 项全过 |
+
+合并后 `main` 实测：`src/**` 106 个文件；R1/R2/R3/R4/R5 = 0 违规；R6 仅 2 条在册例外（语义正确）。
+
+### 8.2 待办（P3/P4/P5 与验收）
+
+| 项 | 内容 | 阻塞 |
+| --- | --- | --- |
+| P7 实机验收 | 主页识别 / 抽卡详情关闭返回主页 / 一键日常逐模块「执行前自动返回主页」开关 | 需要游戏客户端在跑且用户在场 |
+| P3 端口抽象 | `src/tasks/ports.py`（CapturePort/OcrPort/TemplatePort/InputPort/ProgressPort） | 未开工 |
+| P4 `BaseBD2Task` 拆分 | 工具操作 / 页面业务 / 状态输出三分离 | 未开工（P2 已把页面识别搬出） |
+| P5 表达层收敛 | UI 经状态接口读取 `task.info`，不直接摸任务字段 | 未开工 |
+
+### 8.3 本轮发现、需用户决策的问题
+
+1. **右上角「H/房子」分支实机不可达（历史语义，非本轮引入）**：
+   `normalize_ocr_text()` 会把标签小写化，而旧代码与字面量 `"H"` 严格比较，恒为 False。
+   P2 按「不改变游戏行为」原样保留并加测试锁定，**没有**顺手改成小写比较——
+   那会在实机上首次启用一条从未触发的点房子分支。若要启用，应作为独立工作包
+   显式修复并实机验证。
+2. **`src/compat/windows_graphics.py` 的零超时探测**：仍是「零超时=不探测」，
+   属上游 `ok` 库注入钩子，已在守卫中登记为永久例外。
+3. **`map_trade/vision.py` 现为 re-export 薄壳**：方向 `tasks → utils` 合法，
+   领域侧 17 处导入可后续机械替换为 `src.utils.vision_runtime`，本轮未做以控制 diff。
