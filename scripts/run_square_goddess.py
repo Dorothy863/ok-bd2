@@ -8,6 +8,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import ok
 
 from src.config import config
+from src.native_shutdown import release_native_resources
 
 
 def main() -> int:
@@ -18,6 +19,7 @@ def main() -> int:
 
     task = app.get_task(SquareGoddessTask)[0]
     app.run_onetime_task(task, exit_after=False)
+    release_native_resources()
     return 0
 
 

@@ -20,6 +20,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from ok import run_task
 
 from src.config import config
+from src.native_shutdown import release_native_resources
 from src.tasks.BaseBD2Task import BaseBD2Task
 
 
@@ -83,6 +84,7 @@ def main() -> int:
     headless_config = dict(config)
     headless_config["trigger_tasks"] = []
     run_task(headless_config, task=AutoReturnVerifyTask, debug=False, exit_after=False)
+    release_native_resources()
     return 0
 
 

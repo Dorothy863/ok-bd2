@@ -17,6 +17,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import ok
 
 from src.config import config
+from src.native_shutdown import release_native_resources
 
 
 def main() -> int:
@@ -29,6 +30,7 @@ def main() -> int:
 
     batch = app.get_task(DailyBatchTask)[0]
     app.run_onetime_task(batch, exit_after=False)
+    release_native_resources()
     return 0
 
 if __name__ == "__main__":

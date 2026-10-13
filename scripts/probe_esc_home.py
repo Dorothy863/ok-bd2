@@ -17,6 +17,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import ok
 
 from src.config import config
+from src.native_shutdown import release_native_resources
 from src.tasks.debug_registry import install_debug_tasks
 
 _ALIASES = {
@@ -63,6 +64,7 @@ def main() -> int:
     task.config["后台点击实现"] = click_impl
     # exit_after=False：结束时不要关闭 ok 管理的游戏进程。
     app.run_onetime_task(task, exit_after=False)
+    release_native_resources()
     return 0
 
 
