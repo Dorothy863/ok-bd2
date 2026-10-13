@@ -110,6 +110,10 @@ class DailyBatchTask(BaseTask):
                 "启用": True,
                 "启动自动执行日常": False,
                 "完成日常后自动关机": False,
+                # 子任务失败只记录、不中止整条日常：单个模块的偶发失败不应让
+                # 后面的模块全部不执行（2026-10-13 实机：快速狩猎失败导致
+                # 抽抽乐/广场/PVP 全部没跑）。
+                "子任务失败后继续执行": True,
                 **{key: True for key in child_keys},
             }
         )
@@ -125,6 +129,10 @@ class DailyBatchTask(BaseTask):
                     "一键完成日常运行成功且全部已启用子任务今日均已完成"
                     "（含运行前就已完成的项目）后，60 秒倒计时自动关机；"
                     "期间在系统命令行执行 shutdown /a 可取消。"
+                ),
+                "子任务失败后继续执行": (
+                    "子任务失败时是否继续执行后面的子任务。"
+                    "关闭后任一子任务失败即中止整条日常（旧行为）。"
                 ),
                 **{
                     key: f"是否在一键完成日常中执行{key}。"
@@ -242,6 +250,7 @@ class DailyBatchTask(BaseTask):
         failed: list[str] = []
         skipped: list[str] = []
         stop_remaining = False
+        continue_on_failure = bool(self.config.get("子任务失败后继续执行", True))
 
         def publish_outcome() -> None:
             # Live per-child progress feeds the run panel's segments and
@@ -267,7 +276,7 @@ class DailyBatchTask(BaseTask):
             if task is None:
                 failed.append(child.config_key)
                 publish_outcome()
-                stop_remaining = True
+                stop_remaining = not continue_on_failure
                 self.log_error(f"一键完成日常：未找到子任务 {child.config_key}。")
                 continue
 
@@ -324,18 +333,28 @@ class DailyBatchTask(BaseTask):
                     else:
                         failed.append(child.config_key)
                         publish_outcome()
-                        stop_remaining = True
+                        stop_remaining = not continue_on_failure
                         self._delay_child_schedule(schedule_store, str(task.name), False)
                         self.log_warning(
-                            f"一键完成日常：{child.config_key} 失败，停止后续子任务。"
+                            f"一键完成日常：{child.config_key} 失败，"
+                            + (
+                                "继续执行其余子任务。"
+                                if continue_on_failure
+                                else "停止后续子任务。"
+                            )
                         )
             except Exception as exc:
                 failed.append(child.config_key)
                 publish_outcome()
-                stop_remaining = True
+                stop_remaining = not continue_on_failure
                 self._delay_child_schedule(schedule_store, str(task.name), False)
                 self.log_error(
-                    f"一键完成日常：{child.config_key} 异常，停止后续子任务。",
+                    f"一键完成日常：{child.config_key} 异常，"
+                    + (
+                        "继续执行其余子任务。"
+                        if continue_on_failure
+                        else "停止后续子任务。"
+                    ),
                     exc,
                 )
             finally:

@@ -185,7 +185,7 @@ class DailyBatchTaskTest(unittest.TestCase):
         self.assertEqual(["第一项"], observed)
         self.assertEqual("第一项、第二项", task.info.get("完成"))
 
-    def test_failure_stops_later_children_and_disabled_switch_is_skipped(self):
+    def test_failure_continues_later_children_by_default_and_skips_disabled(self):
         class Skipped:
             pass
 
@@ -208,6 +208,30 @@ class DailyBatchTaskTest(unittest.TestCase):
             {Skipped: skipped, Failed: failed, Later: later},
             specs,
             {"启用": True, "关闭项": False, "失败项": True, "后续项": True},
+        )
+
+        # 2026-10-13：单个子任务失败只记录，不再中止整条日常（默认继续执行）。
+        self.assertFalse(DailyBatchTask.run(task))
+        self.assertEqual([("failed", True), ("later", True)], calls)
+
+    def test_failure_can_still_stop_later_children_when_opted_out(self):
+        class Failed:
+            pass
+
+        class Later:
+            pass
+
+        calls = []
+        failed = _ChildTask("failed", calls, result=False)
+        later = _ChildTask("later", calls)
+        specs = (
+            DailyBatchChild("失败项", Failed),
+            DailyBatchChild("后续项", Later),
+        )
+        task, _resets = self.make_task(
+            {Failed: failed, Later: later},
+            specs,
+            {"启用": True, "失败项": True, "后续项": True, "子任务失败后继续执行": False},
         )
 
         self.assertFalse(DailyBatchTask.run(task))
