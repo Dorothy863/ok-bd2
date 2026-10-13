@@ -138,6 +138,21 @@ class CartridgeHomeMixin:
                 )
                 continue
 
+            if recognition.modal_cancel_center is not None:
+                cancel_x, cancel_y = recognition.modal_cancel_center
+                frame_height, frame_width = frame.shape[:2]
+                self.log_info(
+                    f"自动返回主页：第 {step} 步识别到可取消弹窗，"
+                    f"点击“取消”@@({cancel_x},{cancel_y})。".replace("@@", "@")
+                )
+                self.operate_click(
+                    cancel_x / max(1, frame_width),
+                    cancel_y / max(1, frame_height),
+                    name="自动返回主页-取消弹窗",
+                    after_sleep=settle,
+                )
+                continue
+
             if self._click_gacha_detail_close(frame, step):
                 self.sleep(settle)
                 continue

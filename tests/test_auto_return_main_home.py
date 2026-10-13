@@ -26,6 +26,7 @@ def _signals(**overrides):
         "house_hint_center": None,
         "detail_close_center": None,
         "reward_overlay_tap_center": None,
+        "modal_cancel_center": None,
     }
     values.update(overrides)
     return PageSignals(**values)
@@ -59,6 +60,26 @@ class AutoReturnMainHomeTest(unittest.TestCase):
         clicks = []
         task.operate_click = lambda x, y, **kwargs: clicks.append((x, y, kwargs))
         return task, clicks, warnings
+
+    def test_auto_return_cancels_modal_dialog_before_other_actions(self):
+        """AP 不足之类确认框必须先取消掉，否则后续所有子任务都会被挡住。
+
+        2026-10-13 实机：PVP 的“鲜血鸡尾酒不足…是否补充?”弹窗留在屏幕上，
+        导致每个模块的逐模块自动返回都失败。
+        """
+        task, clicks, _warnings = self._looping_task(
+            [
+                _recognition(PageId.MODAL_DIALOG, modal_cancel_center=(1167, 918)),
+                _recognition(PageId.HOME, home_label_seen=True),
+            ]
+        )
+
+        self.assertTrue(task.auto_return_main_home())
+        self.assertEqual(1, len(clicks))
+        x, y, kwargs = clicks[0]
+        self.assertAlmostEqual(1167 / 2560, x)
+        self.assertAlmostEqual(918 / 1440, y)
+        self.assertEqual("自动返回主页-取消弹窗", kwargs.get("name"))
 
     def test_auto_return_dismisses_season_reward_overlay_before_other_actions(self):
         """赛季奖励结算层（“点击画面即可返回”）必须先被点掉，否则流程会卡死。

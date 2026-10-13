@@ -144,6 +144,35 @@ class PageRecognitionTest(unittest.TestCase):
         self.assertEqual(GACHA_DETAIL_KEYWORDS, first.gacha_detail_keywords)
         self.assertEqual((1893, 430), first.detail_close_center)
 
+class ModalDialogRecognitionTest(unittest.TestCase):
+    """可取消弹窗（例如“鲜血鸡尾酒不足 / 取消 / 补充”）必须能被识别。"""
+
+    def _box(self, name, x, y, width, height):
+        return _Box(name=name, x=x, y=y, width=width, height=height)
+
+    def test_cancel_label_marks_modal_dialog(self):
+        frame = np.zeros((1440, 2560, 3), dtype=np.uint8)
+        boxes = [
+            self._box("鲜血鸡尾酒不足，无法进行战斗。是否补充鲜血鸡尾酒?", 800, 600, 900, 60),
+            self._box("取消", 1070, 1067, 180, 28),
+            self._box("补充", 1380, 1067, 180, 28),
+        ]
+
+        recognition = identify_page(frame, boxes)
+
+        self.assertIs(PageId.MODAL_DIALOG, recognition.page)
+        self.assertEqual((1160, 1081), recognition.modal_cancel_center)
+
+    def test_longer_label_containing_cancel_is_not_a_button(self):
+        frame = np.zeros((1440, 2560, 3), dtype=np.uint8)
+        boxes = [self._box("取消体力消耗", 1070, 1067, 180, 28)]
+
+        recognition = identify_page(frame, boxes)
+
+        self.assertIs(PageId.UNKNOWN, recognition.page)
+        self.assertIsNone(recognition.modal_cancel_center)
+
+
 
 if __name__ == "__main__":
     unittest.main()

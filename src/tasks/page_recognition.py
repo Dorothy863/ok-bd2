@@ -23,6 +23,9 @@ GACHA_DETAIL_KEYWORDS = ("抽抽乐点数", "抽1次", "抽10次")
 HOUSE_HINT_LABEL = "H"
 HOUSE_HINT_MIN_X_RATIO = 0.7
 HOUSE_HINT_MAX_Y_RATIO = 0.25
+# 通用可取消弹窗（例如“AP 不足/是否补充”这类确认框）：屏幕上出现“取消”按钮时，
+# 自动返回主页的动作就是把它取消掉——否则弹窗会把后续所有子任务一起挡住。
+MODAL_CANCEL_LABEL = "取消"
 # PVP 赛季奖励结算层：整屏没有 X / 确认按钮，屏幕自带
 # “点击画面即可返回。”提示，因此唯一的动作是点击该提示文字的框中心。
 # 两个标签必须同帧命中才认定，避免在别的页面上误点。
@@ -42,6 +45,7 @@ class PageId(str, Enum):
     HOME = "home"
     GACHA_DETAIL = "gacha_detail"
     REWARD_OVERLAY = "reward_overlay"
+    MODAL_DIALOG = "modal_dialog"
     UNKNOWN = "unknown"
 
 
@@ -54,6 +58,7 @@ class PageSignals:
     house_hint_center: tuple[int, int] | None
     detail_close_center: tuple[int, int] | None
     reward_overlay_tap_center: tuple[int, int] | None
+    modal_cancel_center: tuple[int, int] | None
 
     @property
     def is_home(self) -> bool:
@@ -70,6 +75,10 @@ class PageSignals:
     @property
     def has_reward_overlay(self) -> bool:
         return self.reward_overlay_tap_center is not None
+
+    @property
+    def has_modal_dialog(self) -> bool:
+        return self.modal_cancel_center is not None
 
 
 @dataclass(frozen=True)
@@ -90,6 +99,10 @@ class PageRecognition:
     @property
     def reward_overlay_tap_center(self) -> tuple[int, int] | None:
         return self.signals.reward_overlay_tap_center
+
+    @property
+    def modal_cancel_center(self) -> tuple[int, int] | None:
+        return self.signals.modal_cancel_center
 
 
 def _box_center(box) -> tuple[int, int] | None:
@@ -147,6 +160,17 @@ def reward_overlay_tap_box(boxes) -> object | None:
     return None
 
 
+def modal_cancel_box(boxes) -> object | None:
+    """返回可取消弹窗上的“取消”按钮框（没有则 None）。
+
+    只认恰好等于 ``取消`` 的标签，避免把“取消体力消耗”这类长文案误当按钮。
+    """
+    for box in boxes:
+        if normalize_ocr_text(getattr(box, "name", "")).strip() == MODAL_CANCEL_LABEL:
+            return box
+    return None
+
+
 def build_page_signals(frame, boxes) -> PageSignals:
     """把同一帧的截图尺寸与 OCR 框转换为页面信号（纯函数，不点击）。"""
     frame_height, frame_width = frame.shape[:2]
@@ -159,6 +183,7 @@ def build_page_signals(frame, boxes) -> PageSignals:
     house_hint_center: tuple[int, int] | None = None
     detail_close_center: tuple[int, int] | None = None
     reward_overlay_box = reward_overlay_tap_box(boxes)
+    modal_cancel = modal_cancel_box(boxes)
     for box in boxes:
         label = str(getattr(box, "name", "") or "")
         normalized_label = normalize_ocr_text(label).strip()
@@ -187,6 +212,9 @@ def build_page_signals(frame, boxes) -> PageSignals:
         reward_overlay_tap_center=(
             _box_center(reward_overlay_box) if reward_overlay_box is not None else None
         ),
+        modal_cancel_center=(
+            _box_center(modal_cancel) if modal_cancel is not None else None
+        ),
     )
 
 
@@ -199,6 +227,9 @@ def identify_page(frame, boxes) -> PageRecognition:
         page = PageId.GACHA_DETAIL
     elif signals.has_reward_overlay:
         page = PageId.REWARD_OVERLAY
+    elif signals.has_modal_dialog:
+        # 放在 HOME 之后：主页上若有同名标签也不会误点，但非主页的弹窗必须能取消掉。
+        page = PageId.MODAL_DIALOG
     else:
         page = PageId.UNKNOWN
     return PageRecognition(page=page, signals=signals)
