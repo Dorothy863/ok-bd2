@@ -84,6 +84,7 @@ class DailyBatchTask(BaseTask):
         "完成",
         "失败",
         "跳过",
+        "收尾返回主页",
         "Log",
         "Warning",
         "Error",
@@ -361,6 +362,8 @@ class DailyBatchTask(BaseTask):
                 task.config = original_config
                 self.executor.reset_scene(check_enabled=False)
 
+        self._return_home_before_finishing()
+
         self.info_set("当前子任务", "-")
         self.info_set("完成", "、".join(completed) or "-")
         self.info_set("失败", "、".join(failed) or "-")
@@ -376,6 +379,34 @@ class DailyBatchTask(BaseTask):
         )
         self._maybe_shutdown_after_daily(completed, pre_completed)
         return True
+
+    def _return_home_before_finishing(self) -> None:
+        """收尾时把游戏送回主页。
+
+        批量任务的语义是「主页面到主页面」，但子任务失败（或最后一个子任务结束）时
+        游戏可能停在深层页面（例如 PVP 战斗界面、卡带列表）。留在这个状态会让**下一次**
+        运行的第一个模块连“执行前自动返回主页”都超时，所以这里主动收一次尾。
+
+        复用任一 BD2 子任务的 ``auto_return_main_home``（同一套逻辑，不重复实现）。
+        """
+        for child in self.child_tasks:
+            try:
+                task = self.executor.get_task_by_class(child.task_class)
+            except Exception as exc:  # noqa: BLE001 - 收尾失败不影响任务结果
+                self.log_warning(f"一键完成日常：取子任务 {child.config_key} 失败：{exc}")
+                continue
+            ensure_home = getattr(task, "auto_return_main_home", None)
+            if not callable(ensure_home):
+                continue
+            try:
+                arrived = ensure_home()
+            except Exception as exc:  # noqa: BLE001
+                self.log_warning(f"一键完成日常：收尾返回主页异常：{exc}")
+                return
+            self.info_set("收尾返回主页", "已回到主页。" if arrived else "未能回到主页。")
+            if not arrived:
+                self.log_warning("一键完成日常：收尾时未能确认回到主页。")
+            return
 
     def _maybe_shutdown_after_daily(
         self,

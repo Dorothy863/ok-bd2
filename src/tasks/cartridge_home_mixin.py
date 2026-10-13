@@ -102,6 +102,7 @@ class CartridgeHomeMixin:
             else int(max_steps)
         )
         settle = float(self.config.get("返回主页步间等待秒数", 2.5))
+        no_action_steps = 0
         for step in range(1, step_limit + 1):
             try:
                 frame = self.capture_frame()
@@ -167,8 +168,18 @@ class CartridgeHomeMixin:
                 )
                 return False
 
-            # 没有任何可执行动作，最常见的原因是正在加载/转场（例如只显示游戏 logo
-            # 的加载屏）。先等一步再看，不要立刻放弃——立即放弃会让整条一键日常中止。
+            # 没有任何可执行动作：可能是加载/转场的一瞬，也可能停在某个深层页面
+            # （例如 PVP 战斗界面）。先等一步；累计两步以上都没动作，就升级为点游戏自带的
+            # 右上角「返回主页」按钮（与 AutoLoginTask 的“游戏内返回主页”同一条路）。
+            no_action_steps += 1
+            if no_action_steps >= 2:
+                self.log_info(
+                    f"自动返回主页：第 {step} 步仍无可执行动作，"
+                    "点右上角返回主页按钮升级处理。"
+                )
+                self.attempt_return_home(name=f"自动返回主页 第{step}步")
+                continue
+
             self.log_info(
                 f"自动返回主页：第 {step} 步未匹配到可执行动作（可能正在加载/转场），"
                 f"等待 {settle:g}s 后重试。"

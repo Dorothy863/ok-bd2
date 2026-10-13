@@ -133,7 +133,9 @@ class DailyBatchTaskTest(unittest.TestCase):
         )
 
         self.assertTrue(DailyBatchTask.run(task))
-        self.assertEqual([("first", True)], calls)
+        # 关闭「执行前自动返回主页」后，子任务之前不应有 home 动作；
+        # 末尾那次 ("home", True) 是跑完后的收尾返回主页（LIVE-8）。
+        self.assertEqual([("first", True), ("home", True)], calls)
 
     def test_auto_return_home_before_child_can_be_enabled(self):
         class First:
@@ -150,7 +152,8 @@ class DailyBatchTaskTest(unittest.TestCase):
         )
 
         self.assertTrue(DailyBatchTask.run(task))
-        self.assertEqual([("home", True), ("first", True)], calls)
+        # 子任务之前先回到主页；末尾再收尾返回主页一次（LIVE-8）。
+        self.assertEqual([("home", True), ("first", True), ("home", True)], calls)
 
     def test_progress_is_published_after_each_child(self):
         class First:
@@ -236,6 +239,34 @@ class DailyBatchTaskTest(unittest.TestCase):
 
         self.assertFalse(DailyBatchTask.run(task))
         self.assertEqual([("failed", True)], calls)
+
+    def test_batch_returns_home_after_finishing_even_when_child_failed(self):
+        """LIVE-8：子任务失败会把游戏留在深层页面，收尾必须主动回主页。
+
+        2026-10-13 实机：自动PVP 失败后停在 PVP 战斗界面，下一次运行的第一个模块
+        连“执行前自动返回主页”都超时。
+        """
+
+        class Failed:
+            pass
+
+        calls = []
+        failed = _ChildTask("failed", calls, result=False)
+        failed.config = {"启用": True}
+        failed.auto_return_main_home = lambda: calls.append(("home", True)) or True
+        specs = (DailyBatchChild("失败项", Failed),)
+        task, _resets = self.make_task(
+            {Failed: failed},
+            specs,
+            {"启用": True, "失败项": True},
+        )
+
+        self.assertFalse(DailyBatchTask.run(task))
+        # 子任务前按开关回一次主页；失败后收尾再回一次（LIVE-8 的关键那一次）。
+        self.assertEqual(
+            [("home", True), ("failed", True), ("home", True)],
+            calls,
+        )
 
     def test_child_completion_is_silent_and_batch_emits_one_overview(self):
         class NotifyingChild:
