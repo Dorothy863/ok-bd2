@@ -54,6 +54,22 @@ class AutoReturnVerifyTask(BaseBD2Task):
             f"house_hint={signals.house_hint_center}, "
             f"detail_close={signals.detail_close_center})"
         )
+        # 附带当帧 OCR 标签，便于人工判断当前到底在哪一屏（判定为 UNKNOWN 时尤其需要）。
+        try:
+            frame = self.capture_frame()
+            boxes = list(
+                self.ocr(
+                    frame=frame,
+                    threshold=0.2,
+                    log=False,
+                    name=f"{label}-标签",
+                )
+            )
+        except Exception as exc:  # noqa: BLE001 - 诊断输出
+            self.log_info(f"{label} 标签读取失败：{exc}")
+            return
+        labels = [str(getattr(box, "name", "") or "") for box in boxes]
+        self.log_info(f"{label} 标签 {len(labels)} 个: " + " | ".join(labels))
 
 
 def main() -> int:

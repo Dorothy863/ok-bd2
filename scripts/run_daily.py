@@ -1,5 +1,10 @@
 """Run 一键完成日常 from the current source checkout."""
 
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
 from ok import run_task
 
 from src.config import config
