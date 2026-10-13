@@ -7,7 +7,6 @@
 
 import time
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from time import monotonic
 from typing import Any, Callable
@@ -15,7 +14,12 @@ from typing import Any, Callable
 import cv2
 import numpy as np
 
-from src.tasks.page_recognition import PageId, PageRecognition, identify_page
+from src.tasks.page_recognition import (
+    PageId,
+    PageRecognition,
+    identify_page,
+    reward_overlay_tap_box,
+)
 from src.utils.home_confirmation import (
     HOME_ANNOUNCEMENT_CLEAR_RELATIVE_POINT,
     home_temporary_announcement_detected,
@@ -36,7 +40,6 @@ from src.utils.template_resolution import offline_template_scale
 CARTRIDGE_RECENT_ENTRY_POINT = (0.7875, 0.9111111111111111)
 RECENT_CARTRIDGE_SPECIAL_PAGE_SECONDS = 3.0
 RECENT_CARTRIDGE_SPECIAL_PAGE_MAX_ACTIONS = 3
-BEIJING_TIMEZONE = timezone(timedelta(hours=8))
 RECENT_PVP_CARTRIDGE_TEMPLATE_FILE = "cartridge-image2-left-lower-cutout.png"
 RECENT_PVP_CARTRIDGE_TEMPLATE_THRESHOLD = 0.95
 RECENT_PVP_CARTRIDGE_PIXEL_THRESHOLD = 0.95
@@ -118,6 +121,21 @@ class CartridgeHomeMixin:
                 x = float(self.config.get("返回主页按钮 X 百分比", 93.75)) / 100.0
                 y = float(self.config.get("返回主页按钮 Y 百分比", 5.9)) / 100.0
                 self.operate_click(x, y, name="自动返回主页-房子", after_sleep=settle)
+                continue
+
+            if recognition.reward_overlay_tap_center is not None:
+                tap_x, tap_y = recognition.reward_overlay_tap_center
+                frame_height, frame_width = frame.shape[:2]
+                self.log_info(
+                    f"自动返回主页：第 {step} 步识别到赛季奖励结算层，"
+                    f"点击“点击画面即可返回”提示 @({tap_x},{tap_y})。"
+                )
+                self.operate_click(
+                    tap_x / max(1, frame_width),
+                    tap_y / max(1, frame_height),
+                    name="自动返回主页-赛季奖励关闭",
+                    after_sleep=settle,
+                )
                 continue
 
             if self._click_gacha_detail_close(frame, step):
@@ -462,21 +480,19 @@ class CartridgeHomeMixin:
         self,
         timeout: float = RECENT_CARTRIDGE_SPECIAL_PAGE_SECONDS,
         interval: float = 0.25,
-        allow_season_reward: bool | None = None,
     ) -> bool:
-        """OCR and dismiss PVP promotion, demotion, and season reward pages."""
-        if allow_season_reward is None:
-            allow_season_reward = self._is_beijing_monday()
+        """OCR and dismiss PVP promotion, demotion, and season reward pages.
+
+        三种页面都按**同帧内容**识别，不看星期：赛季奖励结算层只在真实出现时才处理
+        （原先按“北京时间周一”放行，导致周二及之后页面一直清不掉、流程卡死）。
+        """
         end_at = PollDeadline(max(0.0, float(timeout)), monotonic)
         handled: set[str] = set()
         action_count = 0
 
         while True:
             boxes = self._recent_cartridge_ocr_boxes()
-            text, action_name, target_box = self._pvp_special_page_action(
-                boxes,
-                allow_season_reward=allow_season_reward,
-            )
+            text, action_name, target_box = self._pvp_special_page_action(boxes)
             self.info_set("最近卡带特殊页面 OCR", text or "-")
 
             if action_name and action_name not in handled and target_box is not None:
@@ -506,8 +522,6 @@ class CartridgeHomeMixin:
     def _pvp_special_page_action(
         cls,
         boxes: list,
-        *,
-        allow_season_reward: bool,
     ) -> tuple[str, str, object | None]:
         """Return a strict paired PVP special-page action from one OCR frame."""
         text = " ".join(
@@ -516,23 +530,15 @@ class CartridgeHomeMixin:
             if getattr(box, "name", "")
         )
         normalized = normalize_ocr_text(text)
-        if (
-            allow_season_reward
-            and "赛季奖励" in normalized
-            and "点击画面即可返回" in normalized
-        ):
-            return text, "赛季奖励", cls._find_ocr_box(boxes, "点击画面即可返回")
+        reward_box = reward_overlay_tap_box(boxes)
+        if reward_box is not None:
+            return text, "赛季奖励", reward_box
         if "恭喜晋级" in normalized and "确认" in normalized:
             return text, "恭喜晋级", cls._find_ocr_box(boxes, "确认")
         if "段位下滑" in normalized and "确认" in normalized:
             return text, "段位下滑", cls._find_ocr_box(boxes, "确认")
         return text, "", None
 
-    @staticmethod
-    def _is_beijing_monday(now: datetime | None = None) -> bool:
-        if now is None:
-            now = datetime.now(timezone.utc)
-        return now.astimezone(BEIJING_TIMEZONE).weekday() == 0
 
     def _pvp_special_page_ocr_boxes(
         self,

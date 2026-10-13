@@ -169,7 +169,6 @@ class RecentPvpGuardOwnershipTest(unittest.TestCase):
             "_load_recent_pvp_cartridge_template",
             "_handle_recent_cartridge_special_pages",
             "_pvp_special_page_action",
-            "_is_beijing_monday",
             "_pvp_special_page_ocr_boxes",
             "_recent_cartridge_ocr_boxes",
         )

@@ -59,7 +59,6 @@ CARTRIDGE_HOME_METHODS = frozenset(
         "_click_top_left_back",
         "_find_ocr_box",
         "_handle_recent_cartridge_special_pages",
-        "_is_beijing_monday",
         "_load_recent_pvp_cartridge_template",
         "_match_recent_pvp_cartridge",
         "_ocr_box_center",
@@ -194,7 +193,6 @@ class BaseTaskSplitTest(unittest.TestCase):
         )
         box = SimpleNamespace(x=10, y=20, width=40, height=40)
         self.assertEqual((30.0, 40.0), BaseBD2Task._ocr_box_center(box))
-        self.assertIn(BaseBD2Task._is_beijing_monday(), (True, False))
         task.info = {"状态": "运行中"}
         self.assertEqual({"状态": "运行中"}, task_info_snapshot(task))
 

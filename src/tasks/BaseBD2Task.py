@@ -16,7 +16,6 @@ from ok import BaseTask, Logger, og
 from src.scene.BD2Scene import BD2Scene
 from src.scene.ScreenPosition import ScreenPosition
 from src.tasks.cartridge_home_mixin import (
-    BEIJING_TIMEZONE,
     CARTRIDGE_RECENT_ENTRY_POINT,
     PROJECT_ROOT,
     RECENT_CARTRIDGE_SPECIAL_PAGE_MAX_ACTIONS,
@@ -41,7 +40,6 @@ logger = Logger.get_logger(__name__)
 
 # 拆分前可导入的模块级名字继续保留（``__all__`` 同时声明再导出意图）。
 __all__ = [
-    "BEIJING_TIMEZONE",
     "CARTRIDGE_RECENT_ENTRY_POINT",
     "GREEN_MASK_TOLERANCE",
     "PROBE_OUTPUT_DIR",

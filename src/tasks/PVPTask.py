@@ -408,11 +408,6 @@ class PVPTask(BaseBD2Task):
         last_text = ""
         last_hub_score = -1.0
         hub_candidate_at: float | None = None
-        allow_season_reward = self._is_beijing_monday()
-        self.info_set(
-            "PVP 入场特殊页面模式",
-            "周一：赛季奖励及升降级" if allow_season_reward else "非周一：仅升降级",
-        )
 
         while True:
             now = monotonic()
@@ -423,10 +418,7 @@ class PVPTask(BaseBD2Task):
                 frame,
                 name="PVP 入场特殊页面",
             )
-            text, action_name, target_box = self._pvp_special_page_action(
-                boxes,
-                allow_season_reward=allow_season_reward,
-            )
+            text, action_name, target_box = self._pvp_special_page_action(boxes)
             last_text = text or last_text
             self.info_set("PVP 入场特殊页面 OCR", text or "-")
             if action_name:

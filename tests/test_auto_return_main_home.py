@@ -25,6 +25,7 @@ def _signals(**overrides):
         "gacha_detail_keywords": (),
         "house_hint_center": None,
         "detail_close_center": None,
+        "reward_overlay_tap_center": None,
     }
     values.update(overrides)
     return PageSignals(**values)
@@ -58,6 +59,28 @@ class AutoReturnMainHomeTest(unittest.TestCase):
         clicks = []
         task.operate_click = lambda x, y, **kwargs: clicks.append((x, y, kwargs))
         return task, clicks, warnings
+
+    def test_auto_return_dismisses_season_reward_overlay_before_other_actions(self):
+        """赛季奖励结算层（“点击画面即可返回”）必须先被点掉，否则流程会卡死。
+
+        2026-10-13 实机回归：该层没有 X/确认按钮，只能点提示文字框中心。
+        """
+        task, clicks, _warnings = self._looping_task(
+            [
+                _recognition(
+                    PageId.REWARD_OVERLAY,
+                    reward_overlay_tap_center=(1696, 1116),
+                ),
+                _recognition(PageId.HOME, home_label_seen=True),
+            ]
+        )
+
+        self.assertTrue(task.auto_return_main_home())
+        self.assertEqual(1, len(clicks))
+        x, y, kwargs = clicks[0]
+        self.assertAlmostEqual(1696 / 2560, x)
+        self.assertAlmostEqual(1116 / 1440, y)
+        self.assertEqual("自动返回主页-赛季奖励关闭", kwargs.get("name"))
 
     def test_recognize_page_does_not_treat_gacha_detail_labels_as_home(self):
         task, _clicks = self._task(

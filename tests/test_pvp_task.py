@@ -1,6 +1,5 @@
 import unittest
 from dataclasses import replace
-from datetime import datetime, timezone
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -811,7 +810,6 @@ class PVPTaskHelperTest(unittest.TestCase):
                 )
                 task.info_set = lambda *_args, **_kwargs: None
                 task.sleep = lambda *_args, **_kwargs: None
-                task._is_beijing_monday = lambda: True
                 task._recent_cartridge_ocr_boxes = lambda: [
                     SimpleNamespace(name=state_text, x=800, y=200, width=200, height=50),
                     SimpleNamespace(
@@ -876,7 +874,6 @@ class PVPTaskHelperTest(unittest.TestCase):
         )
         task.info_set = lambda *_args, **_kwargs: None
         task.sleep = lambda *_args, **_kwargs: None
-        task._is_beijing_monday = lambda: True
         screens = iter(
             (
                 [
@@ -912,14 +909,7 @@ class PVPTaskHelperTest(unittest.TestCase):
 
         self.assertEqual(2, len(clicks))
 
-    def test_pvp_special_page_mode_uses_beijing_calendar_day(self):
-        monday_in_beijing = datetime(2026, 8, 2, 16, 0, tzinfo=timezone.utc)
-        tuesday_in_beijing = datetime(2026, 8, 3, 16, 0, tzinfo=timezone.utc)
-
-        self.assertTrue(PVPTask._is_beijing_monday(monday_in_beijing))
-        self.assertFalse(PVPTask._is_beijing_monday(tuesday_in_beijing))
-
-    def test_non_monday_ignores_reward_but_still_handles_rank_pages(self):
+    def test_season_reward_overlay_handled_by_content_on_any_weekday(self):
         reward_boxes = [
             SimpleNamespace(name="赛季奖励", x=900, y=200, width=180, height=50),
             SimpleNamespace(
@@ -935,17 +925,12 @@ class PVPTaskHelperTest(unittest.TestCase):
             SimpleNamespace(name="确认", x=930, y=990, width=60, height=30),
         ]
 
-        _text, reward_action, reward_target = PVPTask._pvp_special_page_action(
-            reward_boxes,
-            allow_season_reward=False,
-        )
-        _text, rank_action, rank_target = PVPTask._pvp_special_page_action(
-            rank_boxes,
-            allow_season_reward=False,
-        )
+        _text, reward_action, reward_target = PVPTask._pvp_special_page_action(reward_boxes)
+        _text, rank_action, rank_target = PVPTask._pvp_special_page_action(rank_boxes)
 
-        self.assertEqual("", reward_action)
-        self.assertIsNone(reward_target)
+        # 赛季奖励结算层按同帧内容处理，不再受“北京时间周一”约束（2026-10-13 实机回归）。
+        self.assertEqual("赛季奖励", reward_action)
+        self.assertIs(reward_boxes[1], reward_target)
         self.assertEqual("恭喜晋级", rank_action)
         self.assertIs(rank_boxes[1], rank_target)
 
@@ -964,10 +949,7 @@ class PVPTaskHelperTest(unittest.TestCase):
                     SimpleNamespace(name=text, x=0, y=0, width=10, height=10)
                     for text in texts
                 ]
-                _text, action, target = PVPTask._pvp_special_page_action(
-                    boxes,
-                    allow_season_reward=True,
-                )
+                _text, action, target = PVPTask._pvp_special_page_action(boxes)
                 self.assertEqual("", action)
                 self.assertIsNone(target)
 
@@ -1050,7 +1032,6 @@ class PVPTaskHelperTest(unittest.TestCase):
         task.config = {"主页压暗阈值": 185.0}
         task.info_set = lambda *_args, **_kwargs: None
         task.capture_frame = lambda: np.full((1080, 1920, 3), 255, dtype=np.uint8)
-        task._is_beijing_monday = lambda: True
         task.sleep = lambda *_args, **_kwargs: None
 
         def fake_ocr(_frame, name, roi=None, **_kwargs):
@@ -1491,7 +1472,6 @@ class PVPTaskHelperTest(unittest.TestCase):
         task = object.__new__(PVPTask)
         task.info_set = lambda *_args, **_kwargs: None
         task.capture_frame = lambda: np.zeros((1080, 1920, 3), dtype=np.uint8)
-        task._is_beijing_monday = lambda: True
         screens = iter(
             (
                 [],
@@ -1554,7 +1534,6 @@ class PVPTaskHelperTest(unittest.TestCase):
         task = object.__new__(PVPTask)
         task.info_set = lambda *_args, **_kwargs: None
         task.capture_frame = lambda: np.zeros((1080, 1920, 3), dtype=np.uint8)
-        task._is_beijing_monday = lambda: False
         rank_page = [
             SimpleNamespace(name="段位下滑", x=820, y=700, width=180, height=50),
             SimpleNamespace(name="确认", x=930, y=990, width=60, height=30),
@@ -1590,7 +1569,6 @@ class PVPTaskHelperTest(unittest.TestCase):
         task = object.__new__(PVPTask)
         task.info_set = lambda *_args, **_kwargs: None
         task.capture_frame = lambda: np.zeros((1440, 2560, 3), dtype=np.uint8)
-        task._is_beijing_monday = lambda: False
         ocr_calls = []
         task._pvp_special_page_ocr_boxes = (
             lambda *_args, **_kwargs: ocr_calls.append(True) or []

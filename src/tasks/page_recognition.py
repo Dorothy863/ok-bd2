@@ -23,6 +23,11 @@ GACHA_DETAIL_KEYWORDS = ("抽抽乐点数", "抽1次", "抽10次")
 HOUSE_HINT_LABEL = "H"
 HOUSE_HINT_MIN_X_RATIO = 0.7
 HOUSE_HINT_MAX_Y_RATIO = 0.25
+# PVP 赛季奖励结算层：整屏没有 X / 确认按钮，屏幕自带
+# “点击画面即可返回。”提示，因此唯一的动作是点击该提示文字的框中心。
+# 两个标签必须同帧命中才认定，避免在别的页面上误点。
+REWARD_OVERLAY_TITLE_LABEL = "赛季奖励"
+REWARD_OVERLAY_TAP_LABEL = "点击画面即可返回"
 # 抽卡详情层关闭按钮（X）的标签与命中区域。
 DETAIL_CLOSE_LABELS = ("X", "\u00d7", "\u2715")
 DETAIL_CLOSE_MIN_X_RATIO = 0.45
@@ -36,6 +41,7 @@ class PageId(str, Enum):
 
     HOME = "home"
     GACHA_DETAIL = "gacha_detail"
+    REWARD_OVERLAY = "reward_overlay"
     UNKNOWN = "unknown"
 
 
@@ -47,6 +53,7 @@ class PageSignals:
     gacha_detail_keywords: tuple[str, ...]
     house_hint_center: tuple[int, int] | None
     detail_close_center: tuple[int, int] | None
+    reward_overlay_tap_center: tuple[int, int] | None
 
     @property
     def is_home(self) -> bool:
@@ -59,6 +66,10 @@ class PageSignals:
     @property
     def has_house_hint(self) -> bool:
         return self.house_hint_center is not None
+
+    @property
+    def has_reward_overlay(self) -> bool:
+        return self.reward_overlay_tap_center is not None
 
 
 @dataclass(frozen=True)
@@ -75,6 +86,10 @@ class PageRecognition:
     @property
     def detail_close_center(self) -> tuple[int, int] | None:
         return self.signals.detail_close_center
+
+    @property
+    def reward_overlay_tap_center(self) -> tuple[int, int] | None:
+        return self.signals.reward_overlay_tap_center
 
 
 def _box_center(box) -> tuple[int, int] | None:
@@ -113,6 +128,25 @@ def _in_detail_close_region(
     )
 
 
+def reward_overlay_tap_box(boxes) -> object | None:
+    """返回 PVP 赛季奖励结算层的“点击画面即可返回。”提示框。
+
+    只有同帧同时出现 ``赛季奖励`` 与 ``点击画面即可返回`` 才认定该层，
+    因此这里既是识别也是唯一的关闭目标来源。
+    """
+    joined = " ".join(str(getattr(box, "name", "") or "") for box in boxes)
+    normalized = normalize_ocr_text(joined)
+    if normalize_ocr_text(REWARD_OVERLAY_TITLE_LABEL) not in normalized:
+        return None
+    if normalize_ocr_text(REWARD_OVERLAY_TAP_LABEL) not in normalized:
+        return None
+    normalized_tap = normalize_ocr_text(REWARD_OVERLAY_TAP_LABEL)
+    for box in boxes:
+        if normalized_tap in normalize_ocr_text(getattr(box, "name", "")):
+            return box
+    return None
+
+
 def build_page_signals(frame, boxes) -> PageSignals:
     """把同一帧的截图尺寸与 OCR 框转换为页面信号（纯函数，不点击）。"""
     frame_height, frame_width = frame.shape[:2]
@@ -124,6 +158,7 @@ def build_page_signals(frame, boxes) -> PageSignals:
     home_label_seen = False
     house_hint_center: tuple[int, int] | None = None
     detail_close_center: tuple[int, int] | None = None
+    reward_overlay_box = reward_overlay_tap_box(boxes)
     for box in boxes:
         label = str(getattr(box, "name", "") or "")
         normalized_label = normalize_ocr_text(label).strip()
@@ -149,6 +184,9 @@ def build_page_signals(frame, boxes) -> PageSignals:
         gacha_detail_keywords=gacha_detail_keywords,
         house_hint_center=house_hint_center,
         detail_close_center=detail_close_center,
+        reward_overlay_tap_center=(
+            _box_center(reward_overlay_box) if reward_overlay_box is not None else None
+        ),
     )
 
 
@@ -159,6 +197,8 @@ def identify_page(frame, boxes) -> PageRecognition:
         page = PageId.HOME
     elif signals.is_gacha_detail:
         page = PageId.GACHA_DETAIL
+    elif signals.has_reward_overlay:
+        page = PageId.REWARD_OVERLAY
     else:
         page = PageId.UNKNOWN
     return PageRecognition(page=page, signals=signals)
