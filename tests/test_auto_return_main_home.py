@@ -181,6 +181,20 @@ class AutoReturnMainHomeTest(unittest.TestCase):
             warnings,
         )
 
+    def test_auto_return_waits_and_retries_when_no_action_matches(self):
+        """没有任何可执行动作时先等待重试（加载/转场），不要立刻放弃。
+
+        2026-10-13 实机：加载屏（只显示游戏 logo）会让原来的“无动作即放弃”
+        把整个一键日常带崩。
+        """
+        task, clicks, warnings = self._looping_task(
+            [_recognition(), _recognition(PageId.HOME, home_label_seen=True)]
+        )
+
+        self.assertTrue(task.auto_return_main_home())
+        self.assertEqual([], clicks)
+        self.assertEqual([], warnings)
+
     def test_auto_return_gives_up_after_step_limit(self):
         task, clicks, warnings = self._looping_task([_recognition(), _recognition()])
         task._click_gacha_detail_close = lambda *_args, **_kwargs: False

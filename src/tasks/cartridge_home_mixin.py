@@ -146,10 +146,19 @@ class CartridgeHomeMixin:
                 self.sleep(settle)
                 continue
 
-            self.log_warning(
-                "自动返回主页：当前非主页且未找到 H/房子、详情关闭或左上角返回按钮，无法继续。"
+            if step >= step_limit:
+                self.log_warning(
+                    "自动返回主页：当前非主页且未找到 H/房子、详情关闭或左上角返回按钮，无法继续。"
+                )
+                return False
+
+            # 没有任何可执行动作，最常见的原因是正在加载/转场（例如只显示游戏 logo
+            # 的加载屏）。先等一步再看，不要立刻放弃——立即放弃会让整条一键日常中止。
+            self.log_info(
+                f"自动返回主页：第 {step} 步未匹配到可执行动作（可能正在加载/转场），"
+                f"等待 {settle:g}s 后重试。"
             )
-            return False
+            self.sleep(settle)
 
         self.log_warning(f"自动返回主页：{step_limit} 步内未回到主页。")
         return False
