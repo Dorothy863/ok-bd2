@@ -70,6 +70,9 @@ PVP_STAGE_CLICK_REFERENCE_OFFSET = (0, -75)
 PVP_RESULT_BASE_MINUTES = 20.0
 PVP_RESULT_CLOSE_AFTER_SECONDS = 1.5
 PVP_BATTLE_ONGOING_PATTERN = r"正在进行"
+
+# PVP 卡带槽位点击次数：首次点击常被切类别后的转场吞掉，允许有界重试一次。
+PVP_CARD_SLOT_CLICK_ATTEMPTS = 2
 PVP_AP_SHORTAGE_PATTERN = r"不足"
 PVP_SEASON_REWARD_AFTER_CLICK_SECONDS = 3.0
 PVP_RANK_PAGE_AFTER_CLICK_SECONDS = 2.0
@@ -282,15 +285,23 @@ class PVPTask(BaseBD2Task):
             self.log_info("镜中之战：点击后未确认战斗玩法游戏卡带类别高亮。")
             return False
 
-        self.info_set("当前阶段", "选择 PVP 卡带1号位")
-        self.sleep(FIXED_CARTRIDGE_SLOT_PRE_CLICK_DELAY_SECONDS)
-        self.operate_click(*PVP_CARTRIDGE_SLOT_POINT, after_sleep=0.0)
-
-        if self._wait_for_pvp_hub_after_cart(
-            timeout=float(self.config.get("PVP 入场等待秒数", 30.0)),
-        ):
-            self._clear_pvp_hub_notice_if_present()
-            return True
+        entry_timeout = float(self.config.get("PVP 入场等待秒数", 30.0))
+        for attempt in range(1, PVP_CARD_SLOT_CLICK_ATTEMPTS + 1):
+            self.info_set("当前阶段", f"选择 PVP 卡带1号位（第 {attempt} 次）")
+            self.sleep(FIXED_CARTRIDGE_SLOT_PRE_CLICK_DELAY_SECONDS)
+            self.operate_click(*PVP_CARTRIDGE_SLOT_POINT, after_sleep=0.0)
+            # 第一次只等一小段：卡带槽位点击常被切类别后的转场/动画吞掉，
+            # 早退早重试比一次等满 30 秒更划算（2026-10-13 实机：槽位坐标正确但画面未变化）。
+            is_last = attempt >= PVP_CARD_SLOT_CLICK_ATTEMPTS
+            probe_timeout = entry_timeout if is_last else min(8.0, entry_timeout)
+            if self._wait_for_pvp_hub_after_cart(timeout=probe_timeout):
+                self._clear_pvp_hub_notice_if_present()
+                return True
+            if not is_last:
+                self.log_info(
+                    "镜中之战：点击 PVP 卡带后未确认箱庭（疑似点击被转场吞掉），"
+                    f"重试第 {attempt + 1} 次。"
+                )
 
         return False
 

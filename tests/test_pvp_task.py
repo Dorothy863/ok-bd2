@@ -1132,7 +1132,37 @@ class PVPTaskHelperTest(unittest.TestCase):
             ],
             clicks,
         )
-        self.assertEqual([30.0], hub_waits)
+        # 有界重试可用时，第一次探测只等一小段，早退早重试。
+        self.assertEqual([8.0], hub_waits)
+
+    def test_pvp_entry_retries_slot_click_when_first_click_is_swallowed(self):
+        """2026-10-13 实机：槽位坐标正确但画面未变化（切类别转场吞掉点击）。"""
+        task = object.__new__(PVPTask)
+        task.info_set = lambda *_args, **_kwargs: None
+        task.log_info = lambda *_args, **_kwargs: None
+        task.open_cartridge_quick_switcher = lambda **_kwargs: True
+        task.sleep = lambda *_args, **_kwargs: None
+        task._wait_for_battle_gameplay_category = lambda: True
+        clicks = []
+        task.operate_click = lambda x, y, after_sleep=0: clicks.append((x, y, after_sleep))
+        results = iter((False, True))
+        timeouts = []
+        task._wait_for_pvp_hub_after_cart = (
+            lambda timeout: timeouts.append(timeout) or next(results)
+        )
+        task._clear_pvp_hub_notice_if_present = lambda: None
+        task.config = {}
+
+        self.assertTrue(PVPTask._enter_pvp_from_home(task))
+        self.assertEqual([8.0, 30.0], timeouts)
+        self.assertEqual(
+            [
+                (*BATTLE_GAMEPLAY_CATEGORY_POINT, 0.0),
+                (*PVP_CARTRIDGE_SLOT_POINT, 0.0),
+                (*PVP_CARTRIDGE_SLOT_POINT, 0.0),
+            ],
+            clicks,
+        )
 
     def test_pvp_entry_stops_when_hub_is_not_confirmed(self):
         task = object.__new__(PVPTask)
@@ -1150,9 +1180,11 @@ class PVPTaskHelperTest(unittest.TestCase):
         task.config = {}
 
         self.assertFalse(PVPTask._enter_pvp_from_home(task))
+        # 槽位点击允许有界重试一次（切类别后的转场常吞掉首次点击）。
         self.assertEqual(
             [
                 (*BATTLE_GAMEPLAY_CATEGORY_POINT, 0.0),
+                (*PVP_CARTRIDGE_SLOT_POINT, 0.0),
                 (*PVP_CARTRIDGE_SLOT_POINT, 0.0),
             ],
             clicks,
