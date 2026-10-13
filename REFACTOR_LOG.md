@@ -817,3 +817,12 @@ LIVE-5 的修复点：`src/native_shutdown.py`（退出前 `capture.close()` + �
 `gc.collect()`），接入五个 headless 入口。LIVE-6 的修复点：`PVPTask._enter_pvp_from_home`
 的槽位点击有界重试（`PVP_CARD_SLOT_CLICK_ATTEMPTS=2`）。全量测试 1107 项通过。
 
+### 7.15 LIVE-6b / LIVE-8（2026-10-13 第三轮收尾）
+
+- `2c444a3`：`auto_return_main_home` 新增“取消通用弹窗”分支（`PageId.MODAL_DIALOG`
+  + `PageSignals.modal_cancel_center`，只认恰好等于“取消”的标签），修掉
+  “一个 AP 不足弹窗挡住整条日常”的连锁失败；实机验证弹窗被点掉、画面推进。
+- LIVE-8（新登记）：模块失败后把游戏留在深层页面（如 PVP 战斗界面），
+  逐模块自动返回 6 步内回不去。方向是让模块自己清理自己打开的面板，
+  而不是把脏状态留给下一个模块。
+
