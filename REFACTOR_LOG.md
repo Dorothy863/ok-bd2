@@ -806,3 +806,14 @@ P7 实机验收新增工具 `scripts/verify_auto_return.py`（`identify` / `retu
 （保存帧 `probe_outputs/pvp_hub_entry_failed.png`）；**LIVE-7** 公会/小屋/快速狩猎/抽抽乐
 本轮各自的失败摘要。ISSUE-5（P8 拖动）仍未取证。
 
+### 7.14 LIVE-5 / LIVE-6 修复（2026-10-13 第三轮）
+
+| 提交 | 问题 | 定位方式 | 结果 |
+| --- | --- | --- | --- |
+| `43e6725` | headless 退出时 `0xC0000005`（收尾阶段原生析构） | 高频复现（10 次崩 7 次）+ 四种收尾方式各 12 次对照实验 | 修复后 0/12（复测 0/6）；机制与修复见 `docs/issue.md` |
+| `55b8222` | 自动PVP 点了 PVP 卡带却进不去箱庭，并连带卡住后续模块 | 保存帧 OCR 坐标离线核对（类别/槽位/高亮都对）→ 判定为转场吞点击 | 有界重试一次；实机 `PVP 箱庭 0.944` 进入成功 |
+
+LIVE-5 的修复点：`src/native_shutdown.py`（退出前 `capture.close()` + 清 OCR 会话 +
+`gc.collect()`），接入五个 headless 入口。LIVE-6 的修复点：`PVPTask._enter_pvp_from_home`
+的槽位点击有界重试（`PVP_CARD_SLOT_CLICK_ATTEMPTS=2`）。全量测试 1107 项通过。
+
