@@ -826,3 +826,15 @@ LIVE-5 的修复点：`src/native_shutdown.py`（退出前 `capture.close()` + �
   逐模块自动返回 6 步内回不去。方向是让模块自己清理自己打开的面板，
   而不是把脏状态留给下一个模块。
 
+### 7.16 LIVE-8 修复（`ef3d388`，实机验证待办）
+
+子任务失败会把游戏留在深层页面（PVP 战斗界面等），逐模块自动返回 15s 内回不去，
+并连锁影响下一次运行。修复两处：
+
+1. `auto_return_main_home`：累计两步无动作即升级为点右上角「返回主页」按钮
+   （复用 `attempt_return_home`，与 AutoLoginTask 的“游戏内返回主页”同一条路）；
+2. `DailyBatchTask._return_home_before_finishing()`：跑完（无论成败）收尾回主页，
+   结果写入状态字段「收尾返回主页」。
+
+1111 项测试 + ruff 通过。游戏在实施前已关闭，**实机验证待办**（见 `docs/issue.md` LIVE-8）。
+
