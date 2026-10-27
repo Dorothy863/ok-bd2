@@ -1639,6 +1639,25 @@ class PVPTaskHelperTest(unittest.TestCase):
             clicks,
         )
 
+    def test_pvp_entry_wait_accepts_hub_from_battle_page_ocr(self):
+        task = object.__new__(PVPTask)
+        task.info_set = lambda *_args, **_kwargs: None
+        task.capture_frame = lambda: np.zeros((1440, 2560, 3), dtype=np.uint8)
+        task._pvp_special_page_ocr_boxes = lambda *_args, **_kwargs: [
+            SimpleNamespace(name="阵形设置", x=200, y=1265, width=133, height=35),
+            SimpleNamespace(name="BATTLE", x=2288, y=1289, width=117, height=45),
+            SimpleNamespace(name="自动战斗", x=1973, y=1321, width=104, height=29),
+        ]
+        task._match = lambda *_args, **_kwargs: SimpleNamespace(score=-1.0)
+        task._passes = lambda *_args, **_kwargs: False
+        task.sleep = lambda *_args, **_kwargs: None
+
+        with patch(
+            "src.tasks.PVPTask.monotonic",
+            side_effect=(0.0, 0.1, 2.2),
+        ):
+            self.assertTrue(PVPTask._wait_for_pvp_hub_after_cart(task, timeout=5.0))
+
     def test_pvp_entry_wait_keeps_ocr_active_until_hub_is_detected(self):
         task = object.__new__(PVPTask)
         task.info_set = lambda *_args, **_kwargs: None

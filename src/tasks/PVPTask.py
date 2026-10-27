@@ -10,6 +10,7 @@ from src.tasks.BaseBD2Task import (
     RECENT_CARTRIDGE_SPECIAL_PAGE_MAX_ACTIONS,
     BaseBD2Task,
 )
+from src.tasks.page_recognition import PVP_BATTLE_KEYWORDS
 from src.utils import task_vision
 from src.utils.calibration import FHD_1080, HD_720, QHD_1440
 from src.utils.cartridge_quick_switch import (
@@ -109,6 +110,7 @@ class PVPTask(BaseBD2Task):
         "战斗玩法游戏卡带 OCR",
         "战斗玩法类别高亮",
         "PVP 箱庭",
+        "PVP 箱庭 OCR",
         "PVP 入场特殊页面模式",
         "PVP 入场特殊页面 OCR",
         "PVP 箱庭感叹号",
@@ -470,7 +472,13 @@ class PVPTask(BaseBD2Task):
             hub = self._match(frame, PVP_MEDALS_TEMPLATE)
             last_hub_score = hub.score
             self.info_set("PVP 箱庭", f"{hub.score:.3f}")
-            if self._passes(hub, PVP_MEDALS_TEMPLATE):
+            normalized_text = normalize_ocr_text(text)
+            hub_ocr_matched = all(
+                normalize_ocr_text(keyword) in normalized_text
+                for keyword in PVP_BATTLE_KEYWORDS
+            )
+            self.info_set("PVP 箱庭 OCR", "通过" if hub_ocr_matched else "未命中")
+            if self._passes(hub, PVP_MEDALS_TEMPLATE) or hub_ocr_matched:
                 if hub_candidate_at is None:
                     hub_candidate_at = now
                 stable_seconds = now - hub_candidate_at
