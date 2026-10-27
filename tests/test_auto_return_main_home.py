@@ -285,6 +285,22 @@ class AutoReturnMainHomeTest(unittest.TestCase):
         self.assertEqual([], clicks)
         self.assertEqual([], warnings)
 
+    def test_auto_return_confirms_home_after_last_step_action(self):
+        task, clicks, warnings = self._looping_task(
+            [
+                _recognition(
+                    PageId.HOME_ANNOUNCEMENT,
+                    home_label_seen=True,
+                    home_announcement_seen=True,
+                ),
+                _recognition(PageId.HOME, home_label_seen=True),
+            ]
+        )
+        task.config["自动返回主页最大步数"] = 1
+
+        self.assertTrue(task.auto_return_main_home())
+        self.assertEqual(1, len(clicks))
+        self.assertEqual([], warnings)
     def test_auto_return_gives_up_after_step_limit(self):
         task, clicks, warnings = self._looping_task([_recognition(), _recognition()])
         task._click_gacha_detail_close = lambda *_args, **_kwargs: False

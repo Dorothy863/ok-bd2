@@ -235,6 +235,15 @@ class CartridgeHomeMixin:
             )
             self.sleep(settle)
 
+        # 最后一步可能刚好完成关闭动作，循环结束后页面已经进入主页。
+        # 必须再读取一帧确认，不能因“步数用完”把已成功的结果报成失败。
+        try:
+            frame = self.capture_frame()
+            if self._recognize_page(frame).page is PageId.HOME:
+                self.info_set("自动返回主页", f"最后动作后确认主页（{step_limit} 步）")
+                return True
+        except Exception as exc:
+            self.log_warning(f"自动返回主页：最后动作后确认失败：{exc}")
         self.log_warning(f"自动返回主页：{step_limit} 步内未回到主页。")
         return False
 
