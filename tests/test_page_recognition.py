@@ -43,7 +43,10 @@ def _detail_boxes(**overrides):
 class PageRecognitionTest(unittest.TestCase):
     def test_page_id_defines_required_pages(self):
         names = {page.name for page in PageId}
-        self.assertLessEqual({"HOME", "GACHA_DETAIL", "UNKNOWN"}, names)
+        self.assertLessEqual(
+            {"HOME", "HOME_ANNOUNCEMENT", "GACHA_DETAIL", "UNKNOWN"},
+            names,
+        )
 
     def test_exact_home_label_is_home(self):
         recognition = identify_page(FRAME, [_Box("抽抽乐", 171, 1342, 88, 37)])
@@ -55,6 +58,34 @@ class PageRecognitionTest(unittest.TestCase):
         recognition = identify_page(FRAME, [_Box(f" {HOME_GACHA_LABEL} ", 171, 1342, 88, 37)])
 
         self.assertIs(PageId.HOME, recognition.page)
+
+    def test_dimmed_home_announcement_is_not_home(self):
+        boxes = [
+            _Box("抽抽乐", 172, 1344, 80, 36),
+            _Box("我的小屋", 163, 244, 120, 34),
+            _Box("格鲁TALK", 163, 384, 264, 34),
+            _Box("7天内不再显示", 1755, 304, 200, 35),
+            _Box("前往查看", 1744, 1054, 131, 45),
+        ]
+
+        recognition = identify_page(FRAME, boxes)
+
+        self.assertIs(PageId.HOME_ANNOUNCEMENT, recognition.page)
+        self.assertTrue(recognition.signals.home_announcement_seen)
+
+    def test_bright_home_with_announcement_text_stays_home(self):
+        boxes = [
+            _Box("抽抽乐", 172, 1344, 80, 36),
+            _Box("我的小屋", 163, 244, 120, 34),
+            _Box("格鲁TALK", 163, 384, 264, 34),
+            _Box("7天内不再显示", 1755, 304, 200, 35),
+            _Box("前往查看", 1744, 1054, 131, 45),
+        ]
+
+        recognition = identify_page(np.full_like(FRAME, 255), boxes)
+
+        self.assertIs(PageId.HOME, recognition.page)
+        self.assertFalse(recognition.signals.home_announcement_seen)
 
     def test_gacha_point_label_is_not_home(self):
         recognition = identify_page(FRAME, [_Box("抽抽乐点数", 211, 1337, 138, 34)])

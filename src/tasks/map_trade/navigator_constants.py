@@ -19,6 +19,7 @@ from src.tasks.map_trade.card_status import StoryCardCompletion
 from src.tasks.map_trade.models import CardSpec, MapPageMode, MatchResult, TemplateSpec
 from src.utils.calibration import FHD_1080, reference_rect_to_relative_roi
 from src.utils.cartridge_quick_switch import QUICK_SWITCH_PAGE_LABELS
+from src.utils.home_confirmation import HOME_ANNOUNCEMENT_KEYWORD_GROUPS
 from src.utils.vision_models import FrameGeometry
 
 QUICK_SWITCH_TEMPLATE = TemplateSpec(
@@ -213,10 +214,7 @@ RETURN_HOME_ANNOUNCEMENT_OCR_REGION = (
     1560 / 1920,
     900 / 1080,
 )
-RETURN_HOME_ANNOUNCEMENT_KEYWORD_GROUPS = (
-    ("更新", "抢先看"),
-    ("7天内不再显示", "前往查看"),
-)
+RETURN_HOME_ANNOUNCEMENT_KEYWORD_GROUPS = HOME_ANNOUNCEMENT_KEYWORD_GROUPS
 SHOP_ENTRY_CLICK_RETRIES = 3
 SHOP_ENTRY_CLICK_INTERVAL = 0.5
 SHOP_CLOSE_CLICK_RETRIES = 2

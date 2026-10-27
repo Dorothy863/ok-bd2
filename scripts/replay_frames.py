@@ -127,6 +127,9 @@ def main() -> int:
         lines.append(f"### {path.name}  {frame.shape[1]}x{frame.shape[0]}  boxes={len(boxes)}")
         lines.append(f"page = {recognition.page.value}")
         lines.append(f"home_label_seen = {recognition.signals.home_label_seen}")
+        lines.append(
+            f"home_announcement_seen = {recognition.signals.home_announcement_seen}"
+        )
         lines.append(f"gacha_detail_keywords = {recognition.signals.gacha_detail_keywords}")
         lines.append(f"house_hint_center = {recognition.signals.house_hint_center}")
         lines.append(f"detail_close_center = {recognition.signals.detail_close_center}")

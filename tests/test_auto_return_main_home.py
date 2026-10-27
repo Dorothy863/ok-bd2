@@ -27,6 +27,7 @@ class _Box:
 def _signals(**overrides):
     values = {
         "home_label_seen": False,
+        "home_announcement_seen": False,
         "gacha_detail_keywords": (),
         "house_hint_center": None,
         "detail_close_center": None,
@@ -66,6 +67,26 @@ class AutoReturnMainHomeTest(unittest.TestCase):
         clicks = []
         task.operate_click = lambda x, y, **kwargs: clicks.append((x, y, kwargs))
         return task, clicks, warnings
+
+    def test_auto_return_closes_home_announcement_before_confirming_home(self):
+        """登录奖励活动遮罩会同时保留主页 OCR，不能直接判定 HOME。"""
+        task, clicks, _warnings = self._looping_task(
+            [
+                _recognition(
+                    PageId.HOME_ANNOUNCEMENT,
+                    home_label_seen=True,
+                    home_announcement_seen=True,
+                ),
+                _recognition(PageId.HOME, home_label_seen=True),
+            ]
+        )
+
+        self.assertTrue(task.auto_return_main_home())
+        self.assertEqual(1, len(clicks))
+        x, y, kwargs = clicks[0]
+        self.assertAlmostEqual(169 / 1920, x)
+        self.assertAlmostEqual(615 / 1080, y)
+        self.assertEqual("自动返回主页-活动遮罩关闭", kwargs.get("name"))
 
     def test_auto_return_cancels_modal_dialog_before_other_actions(self):
         """AP 不足之类确认框必须先取消掉，否则后续所有子任务都会被挡住。

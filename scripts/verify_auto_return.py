@@ -51,6 +51,7 @@ class AutoReturnVerifyTask(BaseBD2Task):
         self.log_info(
             f"{label} = {recognition.page.value} "
             f"(home_label_seen={signals.home_label_seen}, "
+            f"home_announcement_seen={signals.home_announcement_seen}, "
             f"gacha_keywords={signals.gacha_detail_keywords}, "
             f"house_hint={signals.house_hint_center}, "
             f"detail_close={signals.detail_close_center})"

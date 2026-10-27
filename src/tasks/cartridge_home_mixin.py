@@ -21,6 +21,7 @@ from src.tasks.page_recognition import (
     reward_overlay_tap_box,
 )
 from src.utils.home_confirmation import (
+    HOME_ANNOUNCEMENT_CLEAR_REFERENCE_POINT,
     HOME_ANNOUNCEMENT_CLEAR_RELATIVE_POINT,
     home_temporary_announcement_detected,
 )
@@ -118,6 +119,20 @@ class CartridgeHomeMixin:
             if recognition.page is PageId.HOME:
                 self.info_set("自动返回主页", f"已是主页（第{step}步）")
                 return True
+
+            if recognition.page is PageId.HOME_ANNOUNCEMENT:
+                self.log_info(
+                    f"自动返回主页：第 {step} 步识别到登录奖励/更新活动遮罩，"
+                    f"点击公告关闭点 @({HOME_ANNOUNCEMENT_CLEAR_REFERENCE_POINT[0]},"
+                    f"{HOME_ANNOUNCEMENT_CLEAR_REFERENCE_POINT[1]})。"
+                )
+                self.operate_click(
+                    *HOME_ANNOUNCEMENT_CLEAR_RELATIVE_POINT,
+                    name="自动返回主页-活动遮罩关闭",
+                    after_sleep=settle,
+                )
+                no_action_steps = 0
+                continue
 
             if recognition.has_house_hint:
                 self.log_info(

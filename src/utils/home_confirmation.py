@@ -21,6 +21,12 @@ HOME_ANNOUNCEMENT_CLEAR_RELATIVE_POINT = (
     HOME_ANNOUNCEMENT_CLEAR_REFERENCE_POINT[0] / 1920,
     HOME_ANNOUNCEMENT_CLEAR_REFERENCE_POINT[1] / 1080,
 )
+# 登录奖励/更新活动遮罩的同帧证据。OCR 会同时读到前景遮罩和后方主页；
+# 只有背景压暗且下面任一关键词组完整命中时，才把 HOME 升级为遮罩页面。
+HOME_ANNOUNCEMENT_KEYWORD_GROUPS = (
+    ("更新", "抢先看"),
+    ("7天内不再显示", "前往查看"),
+)
 
 # 左上图标列整列大 ROI（我的小屋/格鲁TALK/街机游戏）。检测模型需要上下文，
 # 禁止单独拆出单标签小 ROI（实测丢字/返回空）。来源：BUG-20260829-01 实测标定。
@@ -135,6 +141,15 @@ def home_confirmation_passes(
         int(left_hits) >= int(required_left_hits)
         and float(brightness) >= float(brightness_threshold)
         and home_gacha_ocr_matches(gacha_ocr_text)
+    )
+
+
+def home_announcement_text_matches(text: object) -> bool:
+    """Return whether same-frame OCR contains one complete announcement group."""
+    normalized_text = normalize_ocr_text(text)
+    return any(
+        all(normalize_ocr_text(keyword) in normalized_text for keyword in keywords)
+        for keywords in HOME_ANNOUNCEMENT_KEYWORD_GROUPS
     )
 
 

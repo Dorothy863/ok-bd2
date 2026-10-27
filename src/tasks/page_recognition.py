@@ -10,11 +10,20 @@ from __future__ import annotations
 from dataclasses import dataclass
 from enum import Enum
 
+from src.utils.home_confirmation import (
+    HOME_DIMMED_P95_THRESHOLD_DEFAULT,
+    HOME_LEFT_COLUMN_REQUIRED_HITS,
+    home_announcement_text_matches,
+    home_left_column_hits,
+    home_left_column_p95_brightness,
+)
 from src.utils.ocr_utils import normalize_ocr_text
 
 # 主页标签：OCR 文本归一化后必须“恰好等于”该标签才算主页，
 # 因此“抽抽乐点数”“付费抽抽乐”这类包含关系不算主页。
 HOME_GACHA_LABEL = "抽抽乐"
+# 登录奖励/更新活动遮罩：主页标签仍能被 OCR 读到，因此必须结合左列压暗和
+# 遮罩关键词，在 HOME 判定之前升级为独立页面。关键词组定义在 home_confirmation。
 # 抽卡角色详情层：同一帧同时命中三个关键词才算该页面。
 # 命中判断沿用旧实现的“原始标签拼接后子串命中”语义。
 GACHA_DETAIL_KEYWORDS = ("抽抽乐点数", "抽1次", "抽10次")
@@ -46,6 +55,7 @@ class PageId(str, Enum):
     """可确认的页面标识；无法确认时必须落到 ``UNKNOWN``。"""
 
     HOME = "home"
+    HOME_ANNOUNCEMENT = "home_announcement"
     GACHA_DETAIL = "gacha_detail"
     REWARD_OVERLAY = "reward_overlay"
     MODAL_DIALOG = "modal_dialog"
@@ -58,6 +68,7 @@ class PageSignals:
     """一帧 OCR 结果中与页面判定相关的证据。"""
 
     home_label_seen: bool
+    home_announcement_seen: bool
     gacha_detail_keywords: tuple[str, ...]
     house_hint_center: tuple[int, int] | None
     detail_close_center: tuple[int, int] | None
@@ -68,6 +79,10 @@ class PageSignals:
     @property
     def is_home(self) -> bool:
         return self.home_label_seen
+
+    @property
+    def has_home_announcement(self) -> bool:
+        return self.home_announcement_seen
 
     @property
     def is_gacha_detail(self) -> bool:
@@ -216,8 +231,18 @@ def build_page_signals(frame, boxes) -> PageSignals:
             if center is not None and _in_detail_close_region(center, frame_width, frame_height):
                 detail_close_center = center
 
+    home_left_hits = home_left_column_hits(joined_labels)
+    home_brightness = home_left_column_p95_brightness(frame)
+    home_announcement_seen = bool(
+        home_label_seen
+        and home_left_hits >= HOME_LEFT_COLUMN_REQUIRED_HITS
+        and home_brightness < HOME_DIMMED_P95_THRESHOLD_DEFAULT
+        and home_announcement_text_matches(joined_labels)
+    )
+
     return PageSignals(
         home_label_seen=home_label_seen,
+        home_announcement_seen=home_announcement_seen,
         gacha_detail_keywords=gacha_detail_keywords,
         house_hint_center=house_hint_center,
         detail_close_center=detail_close_center,
@@ -232,9 +257,11 @@ def build_page_signals(frame, boxes) -> PageSignals:
 
 
 def identify_page(frame, boxes) -> PageRecognition:
-    """判定当前页面：主页优先，其次抽卡角色详情层，其余一律 ``UNKNOWN``。"""
+    """判定当前页面：活动遮罩优先于主页，其次详情/弹窗，其余为 ``UNKNOWN``。"""
     signals = build_page_signals(frame, boxes)
-    if signals.is_home:
+    if signals.has_home_announcement:
+        page = PageId.HOME_ANNOUNCEMENT
+    elif signals.is_home:
         page = PageId.HOME
     elif signals.is_gacha_detail:
         page = PageId.GACHA_DETAIL
