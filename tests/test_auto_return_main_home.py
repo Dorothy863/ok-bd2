@@ -5,7 +5,12 @@ import unittest
 import numpy as np
 
 from src.tasks.BaseBD2Task import BaseBD2Task
-from src.tasks.page_recognition import PageId, PageRecognition, PageSignals
+from src.tasks.page_recognition import (
+    PVP_BATTLE_KEYWORDS,
+    PageId,
+    PageRecognition,
+    PageSignals,
+)
 
 FRAME = np.zeros((1440, 2560, 3), dtype=np.uint8)
 
@@ -25,6 +30,7 @@ def _signals(**overrides):
         "gacha_detail_keywords": (),
         "house_hint_center": None,
         "detail_close_center": None,
+        "pvp_battle_keywords": (),
         "reward_overlay_tap_center": None,
         "modal_cancel_center": None,
     }
@@ -80,6 +86,48 @@ class AutoReturnMainHomeTest(unittest.TestCase):
         self.assertAlmostEqual(1167 / 2560, x)
         self.assertAlmostEqual(918 / 1440, y)
         self.assertEqual("自动返回主页-取消弹窗", kwargs.get("name"))
+
+    def test_auto_return_exits_pvp_battle_before_clicking_home(self):
+        """2026-10-27 实机：PVP 战斗页不能直接点右上角主页。
+
+        实际状态链是：信息层 X -> PVP 战斗页左上返回 -> PVP 大厅右上主页。
+        前两次实机尝试直接点 (2400,84) 均无效，只点左上 (133,66) 才能先回大厅。
+        """
+        task, clicks, _warnings = self._looping_task(
+            [
+                _recognition(
+                    PageId.PVP_BATTLE,
+                    detail_close_center=(1892, 430),
+                    pvp_battle_keywords=PVP_BATTLE_KEYWORDS,
+                ),
+                _recognition(
+                    PageId.PVP_BATTLE,
+                    pvp_battle_keywords=PVP_BATTLE_KEYWORDS,
+                ),
+                _recognition(),
+                _recognition(),
+                _recognition(PageId.HOME, home_label_seen=True),
+            ]
+        )
+        task.config["自动返回主页最大步数"] = 6
+        task._click_gacha_detail_close = lambda *_args, **_kwargs: False
+        task._click_top_left_back = lambda *_args, **_kwargs: False
+
+        self.assertTrue(task.auto_return_main_home())
+        self.assertEqual(
+            [
+                "自动返回主页-PVP信息层关闭",
+                "自动返回主页-PVP战斗返回",
+                "自动返回主页 第4步",
+            ],
+            [kwargs.get("name") for _x, _y, kwargs in clicks],
+        )
+        self.assertAlmostEqual(1892 / 2560, clicks[0][0])
+        self.assertAlmostEqual(430 / 1440, clicks[0][1])
+        self.assertAlmostEqual(133 / 2560, clicks[1][0])
+        self.assertAlmostEqual(66 / 1440, clicks[1][1])
+        self.assertAlmostEqual(0.9375, clicks[2][0])
+        self.assertAlmostEqual(0.059, clicks[2][1])
 
     def test_auto_return_dismisses_season_reward_overlay_before_other_actions(self):
         """赛季奖励结算层（“点击画面即可返回”）必须先被点掉，否则流程会卡死。

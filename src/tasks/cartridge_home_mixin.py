@@ -38,6 +38,9 @@ from src.utils.polling import PollDeadline
 from src.utils.template_resolution import offline_template_scale
 
 CARTRIDGE_RECENT_ENTRY_POINT = (0.7875, 0.9111111111111111)
+# PVP 战斗设置页的左上返回按钮：该页按钮图形与普通返回条不同，
+# 左上 ROI 模板在 2560x1440 实机帧只能得到 0.376，不能作为唯一入口。
+PVP_BATTLE_BACK_REFERENCE_POINT = (133, 66)
 RECENT_CARTRIDGE_SPECIAL_PAGE_SECONDS = 3.0
 RECENT_CARTRIDGE_SPECIAL_PAGE_MAX_ACTIONS = 3
 RECENT_PVP_CARTRIDGE_TEMPLATE_FILE = "cartridge-image2-left-lower-cutout.png"
@@ -93,8 +96,9 @@ class CartridgeHomeMixin:
 
         每步：截图 → ``identify_page`` 识别页面，再按识别结果决策：
         已是主页直接成功；识别到右上角 H/房子提示时点房子；识别到抽卡详情层时点 X 关闭；
-        其余用 ROI+模板匹配点左上角返回键（仅非主页时执行，主页上它是“返回战场”）。
-        有界循环直到主页或步数用尽。
+        识别到 PVP 战斗设置页时先关信息层、再点该页左上角返回，回到 PVP 大厅后
+        才点右上角主页按钮；其余用 ROI+模板匹配点左上角返回键（仅非主页时执行，
+        主页上它是“返回战场”）。有界循环直到主页或步数用尽。
         """
         step_limit = (
             int(self.config.get("自动返回主页最大步数", 6))
@@ -122,6 +126,7 @@ class CartridgeHomeMixin:
                 x = float(self.config.get("返回主页按钮 X 百分比", 93.75)) / 100.0
                 y = float(self.config.get("返回主页按钮 Y 百分比", 5.9)) / 100.0
                 self.operate_click(x, y, name="自动返回主页-房子", after_sleep=settle)
+                no_action_steps = 0
                 continue
 
             if recognition.reward_overlay_tap_center is not None:
@@ -137,6 +142,7 @@ class CartridgeHomeMixin:
                     name="自动返回主页-赛季奖励关闭",
                     after_sleep=settle,
                 )
+                no_action_steps = 0
                 continue
 
             if recognition.modal_cancel_center is not None:
@@ -144,7 +150,7 @@ class CartridgeHomeMixin:
                 frame_height, frame_width = frame.shape[:2]
                 self.log_info(
                     f"自动返回主页：第 {step} 步识别到可取消弹窗，"
-                    f"点击“取消”@@({cancel_x},{cancel_y})。".replace("@@", "@")
+                    f"点击“取消”@({cancel_x},{cancel_y})。"
                 )
                 self.operate_click(
                     cancel_x / max(1, frame_width),
@@ -152,13 +158,40 @@ class CartridgeHomeMixin:
                     name="自动返回主页-取消弹窗",
                     after_sleep=settle,
                 )
+                no_action_steps = 0
+                continue
+
+            if recognition.page is PageId.PVP_BATTLE:
+                frame_height, frame_width = frame.shape[:2]
+                close_center = recognition.detail_close_center
+                if close_center is not None:
+                    action_x, action_y = close_center
+                    action_name = "自动返回主页-PVP信息层关闭"
+                    action_desc = "关闭信息层"
+                else:
+                    action_x, action_y = PVP_BATTLE_BACK_REFERENCE_POINT
+                    action_name = "自动返回主页-PVP战斗返回"
+                    action_desc = "点击左上角返回"
+                self.log_info(
+                    f"自动返回主页：第 {step} 步识别到 PVP 战斗页，"
+                    f"{action_desc} @({action_x},{action_y})。"
+                )
+                self.operate_click(
+                    action_x / max(1, frame_width),
+                    action_y / max(1, frame_height),
+                    name=action_name,
+                    after_sleep=settle,
+                )
+                no_action_steps = 0
                 continue
 
             if self._click_gacha_detail_close(frame, step):
+                no_action_steps = 0
                 self.sleep(settle)
                 continue
 
             if self._click_top_left_back(frame, step):
+                no_action_steps = 0
                 self.sleep(settle)
                 continue
 
@@ -169,7 +202,7 @@ class CartridgeHomeMixin:
                 return False
 
             # 没有任何可执行动作：可能是加载/转场的一瞬，也可能停在某个深层页面
-            # （例如 PVP 战斗界面）。先等一步；累计两步以上都没动作，就升级为点游戏自带的
+            # （例如 PVP 大厅）。先等一步；连续两步都没动作，就升级为点游戏自带的
             # 右上角「返回主页」按钮（与 AutoLoginTask 的“游戏内返回主页”同一条路）。
             no_action_steps += 1
             if no_action_steps >= 2:
@@ -177,7 +210,8 @@ class CartridgeHomeMixin:
                     f"自动返回主页：第 {step} 步仍无可执行动作，"
                     "点右上角返回主页按钮升级处理。"
                 )
-                self.attempt_return_home(name=f"自动返回主页 第{step}步")
+                if self.attempt_return_home(name=f"自动返回主页 第{step}步"):
+                    no_action_steps = 0
                 continue
 
             self.log_info(

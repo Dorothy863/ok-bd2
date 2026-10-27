@@ -18,6 +18,9 @@ HOME_GACHA_LABEL = "抽抽乐"
 # 抽卡角色详情层：同一帧同时命中三个关键词才算该页面。
 # 命中判断沿用旧实现的“原始标签拼接后子串命中”语义。
 GACHA_DETAIL_KEYWORDS = ("抽抽乐点数", "抽1次", "抽10次")
+# PVP 战斗设置页：三个同帧标签同时出现才认定。该页左上角的返回按钮与普通
+# 页面不是同一套图形，ROI 模板会漏检；业务层据此走明确的返回序列。
+PVP_BATTLE_KEYWORDS = ("阵形设置", "BATTLE", "自动战斗")
 # 右上角“H/房子”提示：保持旧实现的严格等值比较（归一化结果为小写，
 # 所以该分支历史语义为不命中）；本工作包只做结构收敛，不改变实机行为。
 HOUSE_HINT_LABEL = "H"
@@ -46,6 +49,7 @@ class PageId(str, Enum):
     GACHA_DETAIL = "gacha_detail"
     REWARD_OVERLAY = "reward_overlay"
     MODAL_DIALOG = "modal_dialog"
+    PVP_BATTLE = "pvp_battle"
     UNKNOWN = "unknown"
 
 
@@ -57,6 +61,7 @@ class PageSignals:
     gacha_detail_keywords: tuple[str, ...]
     house_hint_center: tuple[int, int] | None
     detail_close_center: tuple[int, int] | None
+    pvp_battle_keywords: tuple[str, ...]
     reward_overlay_tap_center: tuple[int, int] | None
     modal_cancel_center: tuple[int, int] | None
 
@@ -79,6 +84,10 @@ class PageSignals:
     @property
     def has_modal_dialog(self) -> bool:
         return self.modal_cancel_center is not None
+
+    @property
+    def is_pvp_battle(self) -> bool:
+        return len(self.pvp_battle_keywords) == len(PVP_BATTLE_KEYWORDS)
 
 
 @dataclass(frozen=True)
@@ -178,6 +187,9 @@ def build_page_signals(frame, boxes) -> PageSignals:
     gacha_detail_keywords = tuple(
         keyword for keyword in GACHA_DETAIL_KEYWORDS if keyword in joined_labels
     )
+    pvp_battle_keywords = tuple(
+        keyword for keyword in PVP_BATTLE_KEYWORDS if keyword in joined_labels
+    )
 
     home_label_seen = False
     house_hint_center: tuple[int, int] | None = None
@@ -209,6 +221,7 @@ def build_page_signals(frame, boxes) -> PageSignals:
         gacha_detail_keywords=gacha_detail_keywords,
         house_hint_center=house_hint_center,
         detail_close_center=detail_close_center,
+        pvp_battle_keywords=pvp_battle_keywords,
         reward_overlay_tap_center=(
             _box_center(reward_overlay_box) if reward_overlay_box is not None else None
         ),
@@ -230,6 +243,8 @@ def identify_page(frame, boxes) -> PageRecognition:
     elif signals.has_modal_dialog:
         # 放在 HOME 之后：主页上若有同名标签也不会误点，但非主页的弹窗必须能取消掉。
         page = PageId.MODAL_DIALOG
+    elif signals.is_pvp_battle:
+        page = PageId.PVP_BATTLE
     else:
         page = PageId.UNKNOWN
     return PageRecognition(page=page, signals=signals)

@@ -7,6 +7,7 @@ import numpy as np
 from src.tasks.page_recognition import (
     GACHA_DETAIL_KEYWORDS,
     HOME_GACHA_LABEL,
+    PVP_BATTLE_KEYWORDS,
     PageId,
     build_page_signals,
     identify_page,
@@ -126,6 +127,23 @@ class PageRecognitionTest(unittest.TestCase):
         self.assertIs(PageId.UNKNOWN, recognition.page)
         self.assertIsNone(recognition.signals.house_hint_center)
         self.assertFalse(recognition.has_house_hint)
+
+    def test_pvp_battle_requires_all_keywords(self):
+        boxes = [
+            _Box("阵形设置", 1420, 1040, 120, 40),
+            _Box("BATTLE", 1370, 1320, 160, 60),
+            _Box("自动战斗", 1810, 1300, 140, 50),
+        ]
+
+        recognition = identify_page(FRAME, boxes)
+
+        self.assertIs(PageId.PVP_BATTLE, recognition.page)
+        self.assertEqual(PVP_BATTLE_KEYWORDS, recognition.signals.pvp_battle_keywords)
+
+        for missing in PVP_BATTLE_KEYWORDS:
+            with self.subTest(missing=missing):
+                partial = [box for box in boxes if box.name != missing]
+                self.assertIs(PageId.UNKNOWN, identify_page(FRAME, partial).page)
 
     def test_unknown_without_any_label(self):
         recognition = identify_page(FRAME, [])
