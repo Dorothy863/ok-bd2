@@ -70,6 +70,10 @@ PVP_STAGE_CLICK_REFERENCE_OFFSET = (0, -75)
 PVP_RESULT_BASE_MINUTES = 20.0
 PVP_RESULT_CLOSE_AFTER_SECONDS = 1.5
 PVP_BATTLE_ONGOING_PATTERN = r"正在进行"
+# 自动战斗菜单右上角的免费鲜血鸡尾酒余量，例如 0/40。
+PVP_FREE_AP_COUNTER_MIN_X_RATIO = 0.82
+PVP_FREE_AP_COUNTER_MAX_Y_RATIO = 0.12
+PVP_FREE_AP_EMPTY_PATTERN = r"0\s*/\s*\d+"
 
 # PVP 卡带槽位点击次数：首次点击常被切类别后的转场吞掉，允许有界重试一次。
 PVP_CARD_SLOT_CLICK_ATTEMPTS = 2
@@ -112,6 +116,7 @@ class PVPTask(BaseBD2Task):
         "PVP 自动战斗 OCR",
         "PVP 自动战斗点击",
         "PVP 免费AP",
+        "PVP 免费AP余量",
         "PVP 倍率 OCR",
         "PVP 开始战斗 OCR",
         "PVP 战斗中 OCR",
@@ -560,7 +565,10 @@ class PVPTask(BaseBD2Task):
         if not found_menu:
             return "failed"
 
-        if not self._ensure_free_ap_enabled():
+        free_ap_state = self._ensure_free_ap_enabled()
+        if free_ap_state == "depleted":
+            return "ap_depleted"
+        if free_ap_state != "enabled":
             return "failed"
         if not self._ensure_multiplier(multiplier):
             return "failed"
@@ -601,20 +609,41 @@ class PVPTask(BaseBD2Task):
         )
         return "started"
 
-    def _ensure_free_ap_enabled(self) -> bool:
+    def _ensure_free_ap_enabled(self) -> str:
         self.info_set("当前阶段", "确认仅用免费鸡尾酒")
+        frame = self.capture_frame()
+        frame_height, frame_width = frame.shape[:2]
+        counter_text = ""
+        for box in self._ocr_boxes(frame, name="PVP 免费AP余量"):
+            label = str(getattr(box, "name", "") or "").strip()
+            if not re.fullmatch(PVP_FREE_AP_EMPTY_PATTERN, label):
+                continue
+            center_x = int(box.x) + int(box.width) // 2
+            center_y = int(box.y) + int(box.height) // 2
+            if (
+                center_x / max(1, frame_width) >= PVP_FREE_AP_COUNTER_MIN_X_RATIO
+                and center_y / max(1, frame_height) <= PVP_FREE_AP_COUNTER_MAX_Y_RATIO
+            ):
+                counter_text = label
+                break
+        self.info_set("PVP 免费AP余量", counter_text or "-")
+        if counter_text:
+            self.info_set("PVP 免费AP", "已耗尽")
+            self.log_info("镜中之战：免费鲜血鸡尾酒余量为 0，流程结束。")
+            return "depleted"
+
         if self._free_ap_switch_on():
             self.info_set("PVP 免费AP", "已开启")
-            return True
+            return "enabled"
 
         self._click_screen_reference(1732, 557, after_sleep=1.0)
         if self._free_ap_switch_on():
             self.info_set("PVP 免费AP", "已开启")
-            return True
+            return "enabled"
 
         self.info_set("PVP 免费AP", "未确认")
         self.log_info("镜中之战：未能确认仅用免费鸡尾酒开关。")
-        return False
+        return "unconfirmed"
 
     def _free_ap_switch_on(self) -> bool:
         frame = self.capture_frame()

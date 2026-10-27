@@ -1379,7 +1379,7 @@ class PVPTaskHelperTest(unittest.TestCase):
 
         task._wait_for_ocr_patterns = fake_wait_for_ocr_patterns
         task._click_ocr_pattern_center = lambda *_args, **_kwargs: True
-        task._ensure_free_ap_enabled = lambda: True
+        task._ensure_free_ap_enabled = lambda: "enabled"
         starts = []
         task._ensure_multiplier = lambda multiplier: starts.append(multiplier) or True
         task._select_max_battle_count = lambda: None
@@ -2294,7 +2294,7 @@ class PVPTaskHelperTest(unittest.TestCase):
             return True
 
         task._click_template_until = fake_click_template_until
-        task._ensure_free_ap_enabled = lambda: True
+        task._ensure_free_ap_enabled = lambda: "enabled"
         task._ensure_multiplier = lambda _multiplier: True
         task._select_max_battle_count = lambda: None
         auto_clicks = []
@@ -2353,7 +2353,7 @@ class PVPTaskHelperTest(unittest.TestCase):
         task.log_info = lambda *_args, **_kwargs: None
         task.log_warning = lambda *_args, **_kwargs: None
         task._click_template_until = lambda *_args, **_kwargs: True
-        task._ensure_free_ap_enabled = lambda: True
+        task._ensure_free_ap_enabled = lambda: "enabled"
         task._ensure_multiplier = lambda _multiplier: True
         task._select_max_battle_count = lambda: None
         task._click_ocr_pattern_center = lambda *_args, **_kwargs: False
@@ -2431,7 +2431,7 @@ class PVPTaskHelperTest(unittest.TestCase):
 
         task._wait_for_ocr_patterns = fake_wait_for_ocr_patterns
         task._click_ocr_pattern_center = lambda *_args, **_kwargs: True
-        task._ensure_free_ap_enabled = lambda: True
+        task._ensure_free_ap_enabled = lambda: "enabled"
         multiplier_calls = []
         task._ensure_multiplier = (
             lambda multiplier: multiplier_calls.append(multiplier) or False
@@ -2448,6 +2448,25 @@ class PVPTaskHelperTest(unittest.TestCase):
         self.assertEqual("failed", PVPTask._start_auto_battle(task, 10))
         self.assertEqual([10], multiplier_calls)
         self.assertEqual([], clicks)
+
+    def test_free_ap_counter_zero_ends_without_toggling_switch(self):
+        task = object.__new__(PVPTask)
+        infos = {}
+        task.capture_frame = lambda: np.zeros((1440, 2560, 3), dtype=np.uint8)
+        task._ocr_boxes = lambda *_args, **_kwargs: [
+            SimpleNamespace(name="0/40", x=2195, y=56, width=88, height=37)
+        ]
+        task.info_set = lambda key, value: infos.__setitem__(key, value)
+        logs = []
+        task.log_info = logs.append
+        task._free_ap_switch_on = lambda: self.fail(
+            "zero free AP must not inspect or toggle the switch"
+        )
+
+        self.assertEqual("depleted", PVPTask._ensure_free_ap_enabled(task))
+        self.assertEqual("0/40", infos["PVP 免费AP余量"])
+        self.assertEqual("已耗尽", infos["PVP 免费AP"])
+        self.assertIn("免费鲜血鸡尾酒余量为 0", logs[0])
 
     def _make_free_ap_task(self, frame):
         harness = SimpleNamespace(infos={}, logs=[])
