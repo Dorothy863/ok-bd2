@@ -517,6 +517,8 @@ class PVPTaskHelperTest(unittest.TestCase):
             [
                 ("当前阶段", "点击最近卡带"),
                 ("当前阶段", "寻找快速切换按钮"),
+                ("当前阶段", "重试点击最近卡带"),
+                ("当前阶段", "点击最近卡带"),
             ],
             status,
         )
@@ -524,6 +526,46 @@ class PVPTaskHelperTest(unittest.TestCase):
             ["cartridge_quick_switch_failed"],
             diagnostics,
         )
+
+    def test_pvp_entry_recovers_after_one_lost_cartridge_click(self):
+        task = object.__new__(PVPTask)
+        calls = []
+        quick_results = iter((False, True))
+        task.operate_click = lambda *_args, **_kwargs: calls.append("entry")
+        task._sleep_after_recognition = lambda: calls.append("settle")
+        task.info_set = lambda *_args, **_kwargs: None
+        task._recent_cartridge_is_pvp = lambda: calls.append("template") or True
+        task._handle_recent_cartridge_special_pages = (
+            lambda: calls.append("dialog") or False
+        )
+        diagnostics = []
+        task._save_flow_diagnostic = diagnostics.append
+
+        self.assertTrue(
+            task.open_cartridge_quick_switcher(
+                ensure_home=lambda: calls.append("home") or True,
+                click_quick_switch=lambda: calls.append("quick") or next(quick_results),
+                confirm_quick_switch_page=lambda: calls.append("confirm") or True,
+            )
+        )
+        self.assertEqual(
+            [
+                "home",
+                "template",
+                "settle",
+                "entry",
+                "dialog",
+                "quick",
+                "home",
+                "settle",
+                "entry",
+                "dialog",
+                "quick",
+                "confirm",
+            ],
+            calls,
+        )
+        self.assertEqual([], diagnostics)
 
     def test_common_cartridge_entry_rescans_special_pages_after_quick_timeout(self):
         task = object.__new__(PVPTask)
@@ -547,7 +589,7 @@ class PVPTaskHelperTest(unittest.TestCase):
                 ),
             )
         )
-        self.assertEqual(["dialog", "quick", "dialog"], calls)
+        self.assertEqual(["dialog", "quick", "dialog", "quick"], calls)
         self.assertEqual(
             ["cartridge_quick_switch_failed"],
             diagnostics,

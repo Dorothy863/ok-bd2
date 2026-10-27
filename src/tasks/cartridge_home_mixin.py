@@ -418,18 +418,13 @@ class CartridgeHomeMixin:
         self.info_set("当前阶段", "寻找快速切换按钮")
         quick_switch_opened = click_quick_switch()
         if not quick_switch_opened:
-            if recent_cartridge_is_pvp:
-                handled_after_timeout = self._handle_recent_cartridge_special_pages()
-                if not handled_after_timeout:
-                    self._save_flow_diagnostic("cartridge_quick_switch_failed")
-                    return False
-                self.info_set("当前阶段", "特殊页面后重试快速切换按钮")
-                quick_switch_opened = click_quick_switch()
-            else:
-                quick_switch_opened = self._retry_recent_cartridge_entry(
-                    ensure_home=ensure_home,
-                    click_quick_switch=click_quick_switch,
-                )
+            # 最近卡带首次点击可能被转场吞掉。PVP 卡带在点击后没有特殊页面，
+            # 只代表需要继续找快速切换，不能据此认定点击已成功；统一重试一次。
+            quick_switch_opened = self._retry_recent_cartridge_entry(
+                ensure_home=ensure_home,
+                click_quick_switch=click_quick_switch,
+                recent_cartridge_is_pvp=recent_cartridge_is_pvp,
+            )
         if not quick_switch_opened:
             self._save_flow_diagnostic("cartridge_quick_switch_failed")
             return False
@@ -439,6 +434,8 @@ class CartridgeHomeMixin:
         self,
         ensure_home: Callable[[], bool],
         click_quick_switch: Callable[[], bool],
+        *,
+        recent_cartridge_is_pvp: bool = False,
     ) -> bool:
         """Re-click the recent cartridge once after a lost confirmed-home click.
 
@@ -453,6 +450,8 @@ class CartridgeHomeMixin:
         self._sleep_after_recognition()
         self.info_set("当前阶段", "点击最近卡带")
         self.operate_click(*CARTRIDGE_RECENT_ENTRY_POINT, after_sleep=0.0)
+        if recent_cartridge_is_pvp:
+            self._handle_recent_cartridge_special_pages()
         return click_quick_switch()
 
     def _save_flow_diagnostic(self, name: str) -> None:
