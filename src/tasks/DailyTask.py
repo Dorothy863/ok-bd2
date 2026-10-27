@@ -360,13 +360,20 @@ class DailyTask(TaskVisionMixin, QuickHuntConfigMixin, BaseBD2Task):
         if not self._wait_for_home_confirmation("一键收菜入口前主页确认"):
             return False
 
-        self._click_reference(165, 260, after_sleep=1.0)
-        found, text = self._wait_for_ocr_keywords(
-            BUSINESS_COLLECT_KEYWORDS,
-            timeout=float(self.config.get("一键收菜菜单等待秒数", 8.0)),
-            minimum_matches=2,
-            name="business_collect",
-        )
+        found = False
+        text = ""
+        for attempt in range(1, 3):
+            if attempt > 1:
+                self.log_info("一键收菜：首次点击未打开经营管理，重新点击入口。")
+            self._click_reference(165, 260, after_sleep=1.0)
+            found, text = self._wait_for_ocr_keywords(
+                BUSINESS_COLLECT_KEYWORDS,
+                timeout=float(self.config.get("一键收菜菜单等待秒数", 8.0)),
+                minimum_matches=2,
+                name="business_collect",
+            )
+            if found:
+                break
         self.info_set("一键收菜 OCR", text or "-")
         self._status_set("一键收菜弹窗", "是" if found else "否")
         if not found:

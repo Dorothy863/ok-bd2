@@ -881,6 +881,32 @@ class DailyTaskHelperTest(unittest.TestCase):
             clicks,
         )
 
+    def test_business_collect_retries_entry_after_lost_click(self):
+        task = object.__new__(DailyTask)
+        task.config = {"一键收菜菜单等待秒数": 8.0}
+        task.info_set = lambda *_args, **_kwargs: None
+        logs = []
+        task.log_info = logs.append
+        waits = iter(((False, ""), (True, "一键获得 取消")))
+        task._wait_for_ocr_keywords = lambda *_args, **_kwargs: next(waits)
+        task._wait_for_home_confirmation = lambda *_args, **_kwargs: True
+        clicks = []
+        task._click_reference = lambda x, y, after_sleep=0.0: clicks.append((x, y, after_sleep))
+        task.sleep = lambda *_args, **_kwargs: None
+
+        self.assertTrue(DailyTask.run_business_collect(task))
+        self.assertEqual(
+            [
+                (165, 260, 1.0),
+                (165, 260, 1.0),
+                (1090, 814, 2.0),
+                (832, 814, 1.0),
+                (832, 814, 0.0),
+            ],
+            clicks,
+        )
+        self.assertIn("首次点击未打开经营管理", logs[0])
+
     def test_mf_reference_click_uses_1280_by_720_ratios(self):
         task = object.__new__(QuickHuntTask)
         calls = []
