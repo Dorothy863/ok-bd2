@@ -87,6 +87,7 @@ BASE_TASK_METHODS = frozenset(
         "run_with_interval",
         "submit_periodic_task",
         "thread_pool_executor",
+        "verified_transition",
         "wait_main",
         "_task_info_lock",
     }

@@ -6,6 +6,7 @@ import numpy as np
 from qfluentwidgets import FluentIcon
 
 from src.tasks.BaseBD2Task import BaseBD2Task
+from src.tasks.business_transition import TransitionSpec
 from src.tasks.task_vision_mixin import TaskVisionMixin
 from src.utils import task_vision
 from src.utils.calibration import FHD_1080
@@ -336,13 +337,32 @@ class FreeGachaTask(TaskVisionMixin, BaseBD2Task):
 
         self.log_info(f"{section_name}：已确认抽抽乐券详情页，等待后关闭并返回抽卡页面。")
         self.sleep(max(0.0, float(self.config.get("结果页关闭前等待秒数", 1.0))))
-        self._click_reference(
-            1420,
-            326,
-            after_sleep=max(0.0, float(self.config.get("结果页返回前等待秒数", 1.0))),
+
+        def close_detail_and_back():
+            self._click_reference(
+                1420,
+                326,
+                after_sleep=max(
+                    0.0,
+                    float(self.config.get("结果页返回前等待秒数", 1.0)),
+                ),
+            )
+            self._click_reference(105, 51, after_sleep=0.0)
+
+        transition = self.verified_transition(
+            TransitionSpec.create(
+                f"{section_name} 详情层→抽卡页",
+                ["gacha_page"],
+                timeout_seconds=0.0,
+            ),
+            observe=lambda: (
+                "gacha_page"
+                if self._wait_for_gacha_page(f"{section_name} 返回抽卡页")
+                else "unknown"
+            ),
+            action=close_detail_and_back,
         )
-        self._click_reference(105, 51, after_sleep=0.0)
-        return self._wait_for_gacha_page(f"{section_name} 返回抽卡页")
+        return transition.ok
 
     def _click_skip_until_back_page(self, section_name: str) -> tuple[bool, str]:
         duration = max(0.0, float(self.config.get("结果跳过连续点击秒数", 3.0)))
@@ -354,22 +374,39 @@ class FreeGachaTask(TaskVisionMixin, BaseBD2Task):
                 int(self.config.get("结果页关键词最低命中数", len(BACK_PAGE_KEYWORDS))),
             ),
         )
-        end_at = monotonic() + duration
+        def click_skip_for_duration():
+            end_at = monotonic() + duration
+            while monotonic() < end_at:
+                self._click_reference(1770, 60, after_sleep=0.0)
+                remaining = end_at - monotonic()
+                if remaining <= 0:
+                    break
+                self.sleep(min(interval, remaining))
+            return True
 
-        while monotonic() < end_at:
-            self._click_reference(1770, 60, after_sleep=0.0)
-            remaining = end_at - monotonic()
-            if remaining <= 0:
-                break
-            self.sleep(min(interval, remaining))
+        last_text = ""
 
-        return self._wait_for_ocr_keywords(
-            BACK_PAGE_KEYWORDS,
-            timeout=max(0.0, float(self.config.get("结果页 OCR 等待秒数", 5.0))),
-            minimum_matches=minimum_matches,
-            name=f"{section_name}_result",
-            interval=max(0.05, float(self.config.get("结果页 OCR 间隔秒数", 0.1))),
+        def observe_ticket_detail():
+            nonlocal last_text
+            found, last_text = self._wait_for_ocr_keywords(
+                BACK_PAGE_KEYWORDS,
+                timeout=max(0.0, float(self.config.get("结果页 OCR 等待秒数", 5.0))),
+                minimum_matches=minimum_matches,
+                name=f"{section_name}_result",
+                interval=max(0.05, float(self.config.get("结果页 OCR 间隔秒数", 0.1))),
+            )
+            return "ticket_detail" if found else "unknown"
+
+        transition = self.verified_transition(
+            TransitionSpec.create(
+                f"{section_name} 抽卡结果→券详情",
+                ["ticket_detail"],
+                timeout_seconds=0.0,
+            ),
+            observe=observe_ticket_detail,
+            action=click_skip_for_duration,
         )
+        return transition.ok, last_text
 
     def _wait_for_template(
         self,

@@ -10,6 +10,7 @@ from src.tasks.BaseBD2Task import (
     RECENT_CARTRIDGE_SPECIAL_PAGE_MAX_ACTIONS,
     BaseBD2Task,
 )
+from src.tasks.business_transition import TransitionSpec
 from src.tasks.page_recognition import PVP_BATTLE_KEYWORDS
 from src.utils import task_vision
 from src.utils.calibration import FHD_1080, HD_720, QHD_1440
@@ -553,58 +554,35 @@ class PVPTask(BaseBD2Task):
             self.info_set("当前阶段", "自动战斗菜单已打开")
             self.info_set("PVP 自动战斗 OCR", existing_menu_text or "-")
         else:
-            self.info_set("当前阶段", "寻找 PVP 舞台")
-            if not self._click_template_until(
-                PVP_STAGE_TEMPLATE,
-                timeout=12.0,
-                name="PVP 舞台",
-                target_reference_offset=PVP_STAGE_CLICK_REFERENCE_OFFSET,
-                after_sleep=3.0,
-            ):
-                self._recover_stage_position()
-                if not self._click_template_until(
-                    PVP_STAGE_TEMPLATE,
-                    timeout=8.0,
-                    name="PVP 舞台",
-                    target_reference_offset=PVP_STAGE_CLICK_REFERENCE_OFFSET,
-                    after_sleep=3.0,
-                ):
-                    self.log_info("镜中之战：未找到 PVP 舞台物件。")
-                    return "failed"
-
-            self.info_set("当前阶段", "打开自动战斗")
-            found_auto, text = self._wait_for_ocr_patterns(
-                [r"自动战斗", r"自动"],
-                timeout=float(self.config.get("PVP 菜单等待秒数", 12.0)),
-                name="PVP 自动战斗",
-                roi=PVP_AUTO_BATTLE_SCREEN_ROI,
+            stage_transition = self.verified_transition(
+                TransitionSpec.create(
+                    "PVP 舞台→自动战斗入口",
+                    ["launch_button", "menu"],
+                    timeout_seconds=float(self.config.get("PVP 菜单等待秒数", 12.0)),
+                    interval_seconds=0.5,
+                ),
+                observe=self._auto_battle_entry_state,
+                action=self._click_pvp_stage_with_recovery,
             )
-            self.info_set("PVP 自动战斗 OCR", text or "-")
-            if not found_auto:
-                self.log_info("镜中之战：点击舞台后未出现自动战斗菜单。")
+            if not stage_transition.ok:
+                self.log_info(stage_transition.summary)
                 self._save_flow_diagnostic("pvp_auto_battle_failed")
                 return "failed"
-
-            if not self._click_ocr_pattern_center(
-                [r"自动战斗", r"自动"],
-                name="PVP 自动战斗",
-                roi=PVP_AUTO_BATTLE_SCREEN_ROI,
-                after_sleep=1.0,
-            ):
-                self.info_set("PVP 自动战斗点击", "OCR框中心不可用，使用相对比例回退")
-                self._click_screen_reference(
-                    *PVP_AUTO_BATTLE_CLICK_REFERENCE,
-                    after_sleep=1.0,
+            if stage_transition.observed_state == "launch_button":
+                menu_transition = self.verified_transition(
+                    TransitionSpec.create(
+                        "PVP 自动战斗入口→设置菜单",
+                        ["menu"],
+                        timeout_seconds=8.0,
+                        interval_seconds=0.5,
+                    ),
+                    observe=self._auto_battle_entry_state,
+                    action=self._click_auto_battle_entry,
                 )
-            found_menu, menu_text = self._wait_for_ocr_patterns(
-                [r"鲜血鸡尾酒"],
-                timeout=8.0,
-                name="PVP 自动战斗菜单",
-                roi=self._mf_roi(327, 165, 417, 156),
-            )
-            self.info_set("PVP 自动战斗 OCR", menu_text or "-")
-            if not found_menu:
-                return "failed"
+                self.info_set("PVP 自动战斗 OCR", menu_transition.summary)
+                if not menu_transition.ok:
+                    self._save_flow_diagnostic("pvp_auto_battle_failed")
+                    return "failed"
 
         free_ap_state = self._ensure_free_ap_enabled()
         if free_ap_state == "depleted":
@@ -620,9 +598,10 @@ class PVPTask(BaseBD2Task):
         self._click_screen_reference(1381, 1061, after_sleep=2.0)
         return self._wait_battle_start_or_ap_shortage(multiplier)
 
-    def _auto_battle_menu_is_open(self) -> tuple[bool, str]:
+    def _auto_battle_menu_is_open(self, frame=None) -> tuple[bool, str]:
         try:
-            frame = self.capture_frame()
+            if frame is None:
+                frame = self.capture_frame()
             text = self._ocr_text(frame, name="PVP 自动战斗菜单探测")
         except Exception:  # noqa: BLE001 - 探测失败时走正常舞台路径
             return False, ""
@@ -631,6 +610,56 @@ class PVPTask(BaseBD2Task):
             normalize_ocr_text("设置鲜血鸡尾酒消耗量") in normalized
             or normalize_ocr_text("仅使用免费鲜血鸡尾酒") in normalized
         ), text
+
+    def _auto_battle_entry_state(self) -> str:
+        try:
+            frame = self.capture_frame()
+        except Exception:  # noqa: BLE001 - 无法采样时由迁移层报告后置条件失败
+            return "unknown"
+        menu_open, _menu_text = self._auto_battle_menu_is_open(frame)
+        if menu_open:
+            return "menu"
+        try:
+            text = self._ocr_text(
+                frame,
+                name="PVP 自动战斗",
+                roi=PVP_AUTO_BATTLE_SCREEN_ROI,
+            )
+        except Exception:  # noqa: BLE001
+            return "unknown"
+        return "launch_button" if self._matches_any(text, [r"自动战斗", r"自动"]) else "unknown"
+
+    def _click_pvp_stage_with_recovery(self) -> bool:
+        if self._click_template_until(
+            PVP_STAGE_TEMPLATE,
+            timeout=12.0,
+            name="PVP 舞台",
+            target_reference_offset=PVP_STAGE_CLICK_REFERENCE_OFFSET,
+            after_sleep=3.0,
+        ):
+            return True
+        self._recover_stage_position()
+        return self._click_template_until(
+            PVP_STAGE_TEMPLATE,
+            timeout=8.0,
+            name="PVP 舞台",
+            target_reference_offset=PVP_STAGE_CLICK_REFERENCE_OFFSET,
+            after_sleep=3.0,
+        )
+
+    def _click_auto_battle_entry(self) -> bool:
+        if not self._click_ocr_pattern_center(
+            [r"自动战斗", r"自动"],
+            name="PVP 自动战斗",
+            roi=PVP_AUTO_BATTLE_SCREEN_ROI,
+            after_sleep=1.0,
+        ):
+            self.info_set("PVP 自动战斗点击", "OCR框中心不可用，使用相对比例回退")
+            self._click_screen_reference(
+                *PVP_AUTO_BATTLE_CLICK_REFERENCE,
+                after_sleep=1.0,
+            )
+        return True
 
     def _wait_battle_start_or_ap_shortage(self, multiplier: int) -> str:
         timeout = float(self.config.get("PVP 战斗开始等待秒数", 30.0))

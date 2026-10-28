@@ -15,6 +15,11 @@ from ok import BaseTask, Logger, og
 
 from src.scene.BD2Scene import BD2Scene
 from src.scene.ScreenPosition import ScreenPosition
+from src.tasks.business_transition import (
+    TransitionResult,
+    TransitionSpec,
+    execute_transition,
+)
 from src.tasks.cartridge_home_mixin import (
     CARTRIDGE_RECENT_ENTRY_POINT,
     PROJECT_ROOT,
@@ -114,6 +119,29 @@ class BaseBD2Task(DeviceOpsMixin, CartridgeHomeMixin, BaseTask):
         """Publish a completion popup unless this task is running as a batch child."""
 
         log_task_completion(self, message)
+
+    def verified_transition(
+        self,
+        spec: TransitionSpec[Any],
+        *,
+        observe: Callable[[], Any],
+        action: Callable[[], bool | None],
+    ) -> TransitionResult[Any]:
+        """Execute a business action and require its expected postcondition."""
+        result = execute_transition(
+            spec,
+            observe=observe,
+            action=action,
+            sleep=self.sleep,
+        )
+        try:
+            self.info_set(
+                f"状态迁移 {spec.name}",
+                result.summary,
+            )
+        except Exception:  # noqa: BLE001 - 状态展示失败不能破坏业务结果
+            pass
+        return result
 
     def _task_info_lock(self) -> threading.RLock:
         """The per-instance info lock, or a shared fallback for odd instances.

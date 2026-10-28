@@ -905,7 +905,7 @@ class DailyTaskHelperTest(unittest.TestCase):
             ],
             clicks,
         )
-        self.assertIn("首次点击未打开经营管理", logs[0])
+        self.assertIn("2 次入口点击", logs[0])
 
     def test_mf_reference_click_uses_1280_by_720_ratios(self):
         task = object.__new__(QuickHuntTask)

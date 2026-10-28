@@ -1,6 +1,7 @@
 from qfluentwidgets import FluentIcon
 
 from src.tasks.BaseBD2Task import BaseBD2Task
+from src.tasks.business_transition import TransitionSpec
 from src.tasks.quick_hunt import QuickHuntConfigMixin
 from src.tasks.task_vision_mixin import TaskVisionMixin
 from src.utils.home_confirmation import HOME_DIMMED_P95_THRESHOLD_DEFAULT
@@ -360,23 +361,37 @@ class DailyTask(TaskVisionMixin, QuickHuntConfigMixin, BaseBD2Task):
         if not self._wait_for_home_confirmation("一键收菜入口前主页确认"):
             return False
 
-        found = False
-        text = ""
-        for attempt in range(1, 3):
-            if attempt > 1:
-                self.log_info("一键收菜：首次点击未打开经营管理，重新点击入口。")
-            self._click_reference(165, 260, after_sleep=1.0)
-            found, text = self._wait_for_ocr_keywords(
+        last_text = ""
+
+        def observe_collect_dialog():
+            nonlocal last_text
+            found, last_text = self._wait_for_ocr_keywords(
                 BUSINESS_COLLECT_KEYWORDS,
                 timeout=float(self.config.get("一键收菜菜单等待秒数", 8.0)),
                 minimum_matches=2,
                 name="business_collect",
             )
-            if found:
-                break
-        self.info_set("一键收菜 OCR", text or "-")
-        self._status_set("一键收菜弹窗", "是" if found else "否")
-        if not found:
+            return "dialog" if found else "home"
+
+        transition = self.verified_transition(
+            TransitionSpec.create(
+                "一键收菜入口→经营管理",
+                ["dialog"],
+                timeout_seconds=0.0,
+                interval_seconds=0.0,
+                max_action_attempts=2,
+            ),
+            observe=observe_collect_dialog,
+            action=lambda: self._click_reference(165, 260, after_sleep=1.0),
+        )
+        self.info_set("一键收菜 OCR", last_text or "-")
+        self._status_set("一键收菜弹窗", "是" if transition.ok else "否")
+        if transition.action_attempts > 1:
+            self.log_info(
+                "一键收菜：经 "
+                f"{transition.action_attempts} 次入口点击后确认经营管理弹窗。"
+            )
+        if not transition.ok:
             self.log_info("一键收菜：未检测到经营管理弹窗关键字，跳过点击。")
             self._status_set("一键收菜返回主页结果", "未执行")
             return False

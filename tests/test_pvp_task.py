@@ -1369,6 +1369,9 @@ class PVPTaskHelperTest(unittest.TestCase):
         task._ensure_pvp_hub = lambda: True
         task.sleep = lambda *_args, **_kwargs: None
         task._click_template_until = lambda *_args, **_kwargs: True
+        task._auto_battle_menu_is_open = lambda: (False, "")
+        task._auto_battle_entry_state = lambda: "menu"
+        task.sleep = lambda *_args, **_kwargs: None
 
         def fake_wait_for_ocr_patterns(_patterns, timeout, name, **_kwargs):
             if name == "PVP 自动战斗":
@@ -1379,6 +1382,8 @@ class PVPTaskHelperTest(unittest.TestCase):
 
         task._wait_for_ocr_patterns = fake_wait_for_ocr_patterns
         task._click_ocr_pattern_center = lambda *_args, **_kwargs: True
+        task._auto_battle_menu_is_open = lambda: (False, "")
+        task._auto_battle_entry_state = lambda: "menu"
         task._ensure_free_ap_enabled = lambda: "enabled"
         starts = []
         task._ensure_multiplier = lambda multiplier: starts.append(multiplier) or True
@@ -2384,6 +2389,10 @@ class PVPTaskHelperTest(unittest.TestCase):
             return True
 
         task._click_template_until = fake_click_template_until
+        task._auto_battle_menu_is_open = lambda: (False, "")
+        entry_states = iter(("launch_button", "menu"))
+        task._auto_battle_entry_state = lambda: next(entry_states)
+        task.sleep = lambda *_args, **_kwargs: None
         task._ensure_free_ap_enabled = lambda: "enabled"
         task._ensure_multiplier = lambda _multiplier: True
         task._select_max_battle_count = lambda: None
@@ -2443,6 +2452,10 @@ class PVPTaskHelperTest(unittest.TestCase):
         task.log_info = lambda *_args, **_kwargs: None
         task.log_warning = lambda *_args, **_kwargs: None
         task._click_template_until = lambda *_args, **_kwargs: True
+        task._auto_battle_menu_is_open = lambda: (False, "")
+        entry_states = iter(("launch_button", "menu"))
+        task._auto_battle_entry_state = lambda: next(entry_states)
+        task.sleep = lambda *_args, **_kwargs: None
         task._ensure_free_ap_enabled = lambda: "enabled"
         task._ensure_multiplier = lambda _multiplier: True
         task._select_max_battle_count = lambda: None
@@ -2476,12 +2489,15 @@ class PVPTaskHelperTest(unittest.TestCase):
 
     def test_start_auto_battle_timeout_saves_failure_diagnostic(self):
         task = object.__new__(PVPTask)
-        task.config = {}
+        task.config = {"PVP 菜单等待秒数": 0.0}
         task.info_set = lambda *_args, **_kwargs: None
         task.log_info = lambda *_args, **_kwargs: None
         task.log_warning = lambda *_args, **_kwargs: None
+        task.sleep = lambda *_args, **_kwargs: None
+        task._read_free_ap_counter = lambda: "40/40"
+        task._auto_battle_menu_is_open = lambda: (False, "")
         task._click_template_until = lambda *_args, **_kwargs: True
-        task._wait_for_ocr_patterns = lambda *_args, **_kwargs: (False, "2 0")
+        task._auto_battle_entry_state = lambda: "unknown"
         diagnostics = []
         task._save_flow_diagnostic = diagnostics.append
 
@@ -2510,6 +2526,10 @@ class PVPTaskHelperTest(unittest.TestCase):
         task.info_set = lambda *_args, **_kwargs: None
         task.log_info = lambda *_args, **_kwargs: None
         task.log_warning = lambda *_args, **_kwargs: None
+        task.sleep = lambda *_args, **_kwargs: None
+        task._read_free_ap_counter = lambda: "40/40"
+        task._auto_battle_menu_is_open = lambda: (False, "")
+        task._auto_battle_entry_state = lambda: "menu"
         task._click_template_until = lambda *_args, **_kwargs: True
 
         def fake_wait_for_ocr_patterns(_patterns, timeout, name, **_kwargs):
