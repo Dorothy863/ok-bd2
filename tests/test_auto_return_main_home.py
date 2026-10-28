@@ -207,11 +207,24 @@ class AutoReturnMainHomeTest(unittest.TestCase):
         self.assertAlmostEqual(1893 / 2560, clicks[0][0])
         self.assertAlmostEqual(430 / 1440, clicks[0][1])
 
-    def test_gacha_detail_close_requires_page_signals_and_x(self):
+    def test_generic_detail_overlay_close_clicks_x_center(self):
+        boxes = [
+            _Box("抽抽乐券", 659, 508, 133, 45),
+            _Box("拥有626个", 664, 559, 152, 37),
+            _Box("X", 1875, 410, 37, 40),
+        ]
+        task, clicks = self._task(boxes)
+
+        self.assertTrue(BaseBD2Task._click_gacha_detail_close(task, FRAME, 1))
+        self.assertEqual(1, len(clicks))
+        self.assertAlmostEqual(1893 / 2560, clicks[0][0])
+        self.assertAlmostEqual(430 / 1440, clicks[0][1])
+        self.assertEqual("自动返回主页-详情关闭", clicks[0][2].get("name"))
+
+    def test_detail_close_requires_recognized_page_and_x(self):
         task, clicks = self._task(
             [
                 _Box("抽抽乐点数", 211, 1337, 138, 34),
-                _Box("X", 1875, 410, 37, 40),
             ]
         )
 
@@ -230,6 +243,24 @@ class AutoReturnMainHomeTest(unittest.TestCase):
 
         self.assertFalse(BaseBD2Task._click_gacha_detail_close(task, FRAME, 1))
         self.assertEqual([], clicks)
+
+    def test_auto_return_leaves_confirmed_gacha_page_via_known_back_point(self):
+        task, clicks, _warnings = self._looping_task(
+            [
+                _recognition(PageId.GACHA_DETAIL),
+                _recognition(PageId.HOME, home_label_seen=True),
+            ]
+        )
+        task._click_gacha_detail_close = lambda *_args, **_kwargs: False
+        task._click_top_left_back = lambda *_args, **_kwargs: self.fail(
+            "confirmed gacha page must use its calibrated back point"
+        )
+
+        self.assertTrue(task.auto_return_main_home())
+        self.assertEqual(1, len(clicks))
+        self.assertAlmostEqual(105 / 2560, clicks[0][0])
+        self.assertAlmostEqual(51 / 1440, clicks[0][1])
+        self.assertEqual("自动返回主页-抽卡页返回", clicks[0][2].get("name"))
 
     def test_auto_return_uses_gacha_detail_close_then_home(self):
         task, clicks, _warnings = self._looping_task(

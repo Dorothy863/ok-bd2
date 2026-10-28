@@ -205,6 +205,21 @@ class CartridgeHomeMixin:
                 self.sleep(settle)
                 continue
 
+            if recognition.page is PageId.GACHA_DETAIL:
+                frame_height, frame_width = frame.shape[:2]
+                self.log_info(
+                    f"自动返回主页：第 {step} 步识别到主抽卡页，"
+                    "点击左上角返回 @(105,51)。"
+                )
+                self.operate_click(
+                    105 / max(1, frame_width),
+                    51 / max(1, frame_height),
+                    name="自动返回主页-抽卡页返回",
+                    after_sleep=settle,
+                )
+                no_action_steps = 0
+                continue
+
             if self._click_top_left_back(frame, step):
                 no_action_steps = 0
                 self.sleep(settle)
@@ -278,19 +293,22 @@ class CartridgeHomeMixin:
 
         recognition = identify_page(frame, boxes)
         close_center = recognition.detail_close_center
-        if recognition.page is not PageId.GACHA_DETAIL or close_center is None:
+        if (
+            recognition.page not in (PageId.GACHA_DETAIL, PageId.DETAIL_OVERLAY)
+            or close_center is None
+        ):
             return False
 
         center_x, center_y = close_center
         frame_h, frame_w = frame.shape[:2]
         self.log_info(
-            f"自动返回主页：第 {step} 步识别到抽卡详情页，点击关闭 X @"
+            f"自动返回主页：第 {step} 步识别到详情层，点击关闭 X @"
             f"({center_x},{center_y})。"
         )
         self.operate_click(
             center_x / frame_w,
             center_y / frame_h,
-            name="自动返回主页-抽卡详情关闭",
+            name="自动返回主页-详情关闭",
             after_sleep=0.0,
         )
         return True

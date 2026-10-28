@@ -60,6 +60,7 @@ class PageId(str, Enum):
     REWARD_OVERLAY = "reward_overlay"
     MODAL_DIALOG = "modal_dialog"
     PVP_BATTLE = "pvp_battle"
+    DETAIL_OVERLAY = "detail_overlay"
     UNKNOWN = "unknown"
 
 
@@ -272,6 +273,10 @@ def identify_page(frame, boxes) -> PageRecognition:
         page = PageId.MODAL_DIALOG
     elif signals.is_pvp_battle:
         page = PageId.PVP_BATTLE
+    elif signals.detail_close_center is not None:
+        # 非抽卡页的通用详情层（例如抽抽乐券详情/奖励物品详情）
+        # 同样由右上角 X 关闭；放在具体页面识别之后，避免抢占 PVP 等页面。
+        page = PageId.DETAIL_OVERLAY
     else:
         page = PageId.UNKNOWN
     return PageRecognition(page=page, signals=signals)

@@ -130,6 +130,19 @@ class PageRecognitionTest(unittest.TestCase):
         self.assertIs(PageId.GACHA_DETAIL, recognition.page)
         self.assertEqual((1893, 430), recognition.detail_close_center)
 
+    def test_non_gacha_detail_x_marks_generic_detail_overlay(self):
+        recognition = identify_page(
+            FRAME,
+            [
+                _Box("抽抽乐券", 659, 508, 133, 45),
+                _Box("拥有626个", 664, 559, 152, 37),
+                _Box("X", 1875, 410, 37, 40),
+            ],
+        )
+
+        self.assertIs(PageId.DETAIL_OVERLAY, recognition.page)
+        self.assertEqual((1893, 430), recognition.detail_close_center)
+
     def test_detail_close_region_bounds_are_inclusive(self):
         recognition = identify_page(FRAME, [*_detail_boxes(), _Box("X", 1132, 410, 40, 40)])
 
