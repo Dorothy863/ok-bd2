@@ -14,6 +14,7 @@ from typing import Any, Callable
 import cv2
 import numpy as np
 
+from src.tasks.business_transition import TransitionSpec
 from src.tasks.page_recognition import (
     PageId,
     PageRecognition,
@@ -454,25 +455,44 @@ class CartridgeHomeMixin:
         # -> recent cartridge -> OCR PVP special pages only for a recent PVP cartridge
         # -> recognize the quick-switch icon -> click the recognized center
         # -> confirm the cartridge selection page.
-        self._sleep_after_recognition()
-        self.info_set("当前阶段", "点击最近卡带")
-        self.operate_click(*CARTRIDGE_RECENT_ENTRY_POINT, after_sleep=0.0)
-        if recent_cartridge_is_pvp:
-            self._handle_recent_cartridge_special_pages()
-        self.info_set("当前阶段", "寻找快速切换按钮")
-        quick_switch_opened = click_quick_switch()
-        if not quick_switch_opened:
-            # 最近卡带首次点击可能被转场吞掉。PVP 卡带在点击后没有特殊页面，
-            # 只代表需要继续找快速切换，不能据此认定点击已成功；统一重试一次。
-            quick_switch_opened = self._retry_recent_cartridge_entry(
-                ensure_home=ensure_home,
-                click_quick_switch=click_quick_switch,
-                recent_cartridge_is_pvp=recent_cartridge_is_pvp,
-            )
-        if not quick_switch_opened:
+        action_attempt = {"count": 0}
+
+        def open_quick_switch_once():
+            action_attempt["count"] += 1
+            if action_attempt["count"] > 1:
+                return self._retry_recent_cartridge_entry(
+                    ensure_home=ensure_home,
+                    click_quick_switch=click_quick_switch,
+                    recent_cartridge_is_pvp=recent_cartridge_is_pvp,
+                )
+
+            self._sleep_after_recognition()
+            self.info_set("当前阶段", "点击最近卡带")
+            self.operate_click(*CARTRIDGE_RECENT_ENTRY_POINT, after_sleep=0.0)
+            if recent_cartridge_is_pvp:
+                self._handle_recent_cartridge_special_pages()
+            self.info_set("当前阶段", "寻找快速切换按钮")
+            return click_quick_switch()
+
+        transition = self.verified_transition(
+            TransitionSpec.create(
+                "最近卡带→快速切换页",
+                ["quick_switch_page"],
+                timeout_seconds=0.0,
+                interval_seconds=0.0,
+                max_action_attempts=2,
+            ),
+            observe=lambda: (
+                "quick_switch_page"
+                if confirm_quick_switch_page()
+                else "unknown"
+            ),
+            action=open_quick_switch_once,
+        )
+        if not transition.ok:
             self._save_flow_diagnostic("cartridge_quick_switch_failed")
             return False
-        return bool(confirm_quick_switch_page())
+        return True
 
     def _retry_recent_cartridge_entry(
         self,

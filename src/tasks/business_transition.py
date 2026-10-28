@@ -184,7 +184,8 @@ def execute_transition(
 
         if dispatched is False:
             if attempt < spec.max_action_attempts:
-                sleep(max(0.0, spec.interval_seconds))
+                if spec.interval_seconds > 0:
+                    sleep(spec.interval_seconds)
                 continue
             break
 
@@ -208,12 +209,13 @@ def execute_transition(
                     observations=tuple(observations),
                     elapsed_seconds=max(0.0, clock() - started_at),
                 )
-            sleep(max(0.0, spec.interval_seconds))
+            if spec.interval_seconds > 0:
+                sleep(spec.interval_seconds)
 
         if error is not None:
             break
-        if attempt < spec.max_action_attempts:
-            sleep(max(0.0, spec.interval_seconds))
+        if attempt < spec.max_action_attempts and spec.interval_seconds > 0:
+            sleep(spec.interval_seconds)
 
     return TransitionResult(
         spec=spec,

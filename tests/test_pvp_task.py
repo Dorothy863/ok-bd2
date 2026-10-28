@@ -346,6 +346,11 @@ class PVPTaskHelperTest(unittest.TestCase):
             [
                 ("当前阶段", "点击最近卡带"),
                 ("当前阶段", "寻找快速切换按钮"),
+                (
+                    "状态迁移 最近卡带→快速切换页",
+                    "最近卡带→快速切换页: 通过; "
+                    "expected=quick_switch_page; observed=quick_switch_page; attempts=1",
+                ),
             ],
             status,
         )
@@ -519,6 +524,11 @@ class PVPTaskHelperTest(unittest.TestCase):
                 ("当前阶段", "寻找快速切换按钮"),
                 ("当前阶段", "重试点击最近卡带"),
                 ("当前阶段", "点击最近卡带"),
+                (
+                    "状态迁移 最近卡带→快速切换页",
+                    "最近卡带→快速切换页: 动作未派发; "
+                    "expected=quick_switch_page; observed=-; attempts=2",
+                ),
             ],
             status,
         )
