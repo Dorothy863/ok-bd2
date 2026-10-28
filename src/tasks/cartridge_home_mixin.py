@@ -38,7 +38,9 @@ from src.utils.ocr_utils import normalize_ocr_text
 from src.utils.polling import PollDeadline
 from src.utils.template_resolution import offline_template_scale
 
-CARTRIDGE_RECENT_ENTRY_POINT = (0.7875, 0.9111111111111111)
+# “最近登录”按钮 OCR 框中心（2560×1440 实机）。PVP 卡面模板中心是
+# “游戏卡珍藏集”入口，不能作为最近战场点击目标。
+CARTRIDGE_RECENT_ENTRY_POINT = (2020 / 2560, 1352 / 1440)
 # PVP 战斗设置页的左上返回按钮：该页按钮图形与普通返回条不同，
 # 左上 ROI 模板在 2560x1440 实机帧只能得到 0.376，不能作为唯一入口。
 PVP_BATTLE_BACK_REFERENCE_POINT = (133, 66)
@@ -171,6 +173,21 @@ class CartridgeHomeMixin:
                     cancel_x / max(1, frame_width),
                     cancel_y / max(1, frame_height),
                     name="自动返回主页-取消弹窗",
+                    after_sleep=settle,
+                )
+                no_action_steps = 0
+                continue
+
+            if recognition.page is PageId.CARD_COLLECTION:
+                frame_height, frame_width = frame.shape[:2]
+                self.log_info(
+                    f"自动返回主页：第 {step} 步识别到游戏卡珍藏集，"
+                    "点击左上返回 @(230,67)。"
+                )
+                self.operate_click(
+                    230 / max(1, frame_width),
+                    67 / max(1, frame_height),
+                    name="自动返回主页-卡带收藏返回",
                     after_sleep=settle,
                 )
                 no_action_steps = 0

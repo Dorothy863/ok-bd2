@@ -335,7 +335,7 @@ class PVPTaskHelperTest(unittest.TestCase):
                 confirm_quick_switch_page=lambda: stages.append("confirm") or True,
             )
         )
-        self.assertEqual([(0.7875, 0.9111111111111111, 0.0)], calls)
+        self.assertEqual([(2020 / 2560, 1352 / 1440, 0.0)], calls)
         self.assertEqual(["settle"], settle)
         self.assertEqual(
             ["home", "pvp_template", "dialog", "click", "confirm"],

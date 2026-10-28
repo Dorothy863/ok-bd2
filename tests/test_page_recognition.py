@@ -44,7 +44,14 @@ class PageRecognitionTest(unittest.TestCase):
     def test_page_id_defines_required_pages(self):
         names = {page.name for page in PageId}
         self.assertLessEqual(
-            {"HOME", "HOME_ANNOUNCEMENT", "GACHA_DETAIL", "UNKNOWN"},
+            {
+                "HOME",
+                "HOME_ANNOUNCEMENT",
+                "CARD_COLLECTION",
+                "DETAIL_OVERLAY",
+                "GACHA_DETAIL",
+                "UNKNOWN",
+            },
             names,
         )
 
@@ -58,6 +65,15 @@ class PageRecognitionTest(unittest.TestCase):
         recognition = identify_page(FRAME, [_Box(f" {HOME_GACHA_LABEL} ", 171, 1342, 88, 37)])
 
         self.assertIs(PageId.HOME, recognition.page)
+
+    def test_card_collection_title_marks_card_collection_page(self):
+        recognition = identify_page(
+            FRAME,
+            [_Box("游戏卡珍藏集", 317, 37, 288, 45)],
+        )
+
+        self.assertIs(PageId.CARD_COLLECTION, recognition.page)
+        self.assertTrue(recognition.signals.card_collection_seen)
 
     def test_dimmed_home_announcement_is_not_home(self):
         boxes = [

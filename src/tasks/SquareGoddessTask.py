@@ -248,6 +248,7 @@ class SquareGoddessTask(BaseBD2Task):
         ):
             return True
 
+        self._save_flow_diagnostic("square_plaza_entry_failed")
         return False
 
     def _ensure_home_with_return(self) -> bool:

@@ -22,6 +22,9 @@ from src.utils.ocr_utils import normalize_ocr_text
 # 主页标签：OCR 文本归一化后必须“恰好等于”该标签才算主页，
 # 因此“抽抽乐点数”“付费抽抽乐”这类包含关系不算主页。
 HOME_GACHA_LABEL = "抽抽乐"
+# 卡带收藏全屏页：左上白色返回按钮没有可识别文字，
+# 但标题是稳定标签；业务层据此使用标定返回点。
+CARD_COLLECTION_LABEL = "游戏卡珍藏集"
 # 登录奖励/更新活动遮罩：主页标签仍能被 OCR 读到，因此必须结合左列压暗和
 # 遮罩关键词，在 HOME 判定之前升级为独立页面。关键词组定义在 home_confirmation。
 # 抽卡角色详情层：同一帧同时命中三个关键词才算该页面。
@@ -60,6 +63,7 @@ class PageId(str, Enum):
     REWARD_OVERLAY = "reward_overlay"
     MODAL_DIALOG = "modal_dialog"
     PVP_BATTLE = "pvp_battle"
+    CARD_COLLECTION = "card_collection"
     DETAIL_OVERLAY = "detail_overlay"
     UNKNOWN = "unknown"
 
@@ -70,6 +74,7 @@ class PageSignals:
 
     home_label_seen: bool
     home_announcement_seen: bool
+    card_collection_seen: bool
     gacha_detail_keywords: tuple[str, ...]
     house_hint_center: tuple[int, int] | None
     detail_close_center: tuple[int, int] | None
@@ -84,6 +89,10 @@ class PageSignals:
     @property
     def has_home_announcement(self) -> bool:
         return self.home_announcement_seen
+
+    @property
+    def is_card_collection(self) -> bool:
+        return self.card_collection_seen
 
     @property
     def is_gacha_detail(self) -> bool:
@@ -208,6 +217,10 @@ def build_page_signals(frame, boxes) -> PageSignals:
     )
 
     home_label_seen = False
+    card_collection_seen = (
+        normalize_ocr_text(CARD_COLLECTION_LABEL).strip()
+        in normalize_ocr_text(joined_labels)
+    )
     house_hint_center: tuple[int, int] | None = None
     detail_close_center: tuple[int, int] | None = None
     reward_overlay_box = reward_overlay_tap_box(boxes)
@@ -244,6 +257,7 @@ def build_page_signals(frame, boxes) -> PageSignals:
     return PageSignals(
         home_label_seen=home_label_seen,
         home_announcement_seen=home_announcement_seen,
+        card_collection_seen=card_collection_seen,
         gacha_detail_keywords=gacha_detail_keywords,
         house_hint_center=house_hint_center,
         detail_close_center=detail_close_center,
@@ -273,6 +287,8 @@ def identify_page(frame, boxes) -> PageRecognition:
         page = PageId.MODAL_DIALOG
     elif signals.is_pvp_battle:
         page = PageId.PVP_BATTLE
+    elif signals.is_card_collection:
+        page = PageId.CARD_COLLECTION
     elif signals.detail_close_center is not None:
         # 非抽卡页的通用详情层（例如抽抽乐券详情/奖励物品详情）
         # 同样由右上角 X 关闭；放在具体页面识别之后，避免抢占 PVP 等页面。

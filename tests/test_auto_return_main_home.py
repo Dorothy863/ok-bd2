@@ -28,6 +28,7 @@ def _signals(**overrides):
     values = {
         "home_label_seen": False,
         "home_announcement_seen": False,
+        "card_collection_seen": False,
         "gacha_detail_keywords": (),
         "house_hint_center": None,
         "detail_close_center": None,
@@ -67,6 +68,20 @@ class AutoReturnMainHomeTest(unittest.TestCase):
         clicks = []
         task.operate_click = lambda x, y, **kwargs: clicks.append((x, y, kwargs))
         return task, clicks, warnings
+
+    def test_auto_return_leaves_card_collection_via_known_back_point(self):
+        task, clicks, _warnings = self._looping_task(
+            [
+                _recognition(PageId.CARD_COLLECTION, card_collection_seen=True),
+                _recognition(PageId.HOME, home_label_seen=True),
+            ]
+        )
+
+        self.assertTrue(task.auto_return_main_home())
+        self.assertEqual(1, len(clicks))
+        self.assertAlmostEqual(230 / 2560, clicks[0][0])
+        self.assertAlmostEqual(67 / 1440, clicks[0][1])
+        self.assertEqual("自动返回主页-卡带收藏返回", clicks[0][2].get("name"))
 
     def test_auto_return_closes_home_announcement_before_confirming_home(self):
         """登录奖励活动遮罩会同时保留主页 OCR，不能直接判定 HOME。"""
