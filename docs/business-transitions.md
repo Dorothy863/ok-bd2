@@ -51,13 +51,21 @@
 | 最近卡带 → 点击快速切换 | 快速切换页 `quick_switch_page` | `CartridgeHomeMixin.open_cartridge_quick_switcher` |
 | 生活卡带第二格 → 梦幻广场 | 广场模板 `square` | `SquareGoddessTask._enter_square_from_home` |
 
-## 待迁移
+## P9 完成门槛
 
-- `DailyTask`：公会、小屋入口的重复点击逻辑。
-- `auto_return_main_home`：目前已有手写状态循环，后续可收敛到同一迁移契约。
-- `MapTradeTask` / `MapCollectionTask`：长途导航中的点击与页面确认。
+- 统一迁移契约与 `BaseBD2Task` 接入：完成。
+- 覆盖当前一键日常主链的关键动作：完成。
+- 全量测试通过：完成（1136 项）。
+- 迁移后完整日常实机通过：完成（5 项完成、1 项按配置跳过、收尾回主页）。
+- 后置条件失败必须保留 expected/observed/attempts：完成。
 
-迁移顺序应按真实失败频率决定，不为了形式统一一次性重写全部任务。
+## 后续扩展（不阻塞 P9）
+
+- `DailyTask` 的公会/小屋入口已经有各自的前置主页和页面/OCR 后置验证，后续可统一到迁移契约。
+- `auto_return_main_home` 本身已是有界页面状态循环，后续可标准化为通用迁移器。
+- `MapTradeTask` / `MapCollectionTask` 当前不在已启用日常链内，后续按需迁移。
+
+扩展顺序按真实失败频率决定，不为了形式统一一次性重写全部任务。
 
 ## 验证要求
 
