@@ -49,10 +49,10 @@
 | 点击 PVP 舞台 | 自动战斗入口 `launch_button` 或设置菜单 `menu` | `PVPTask._start_auto_battle` |
 | 点击自动战斗入口 | 设置菜单 `menu` | `PVPTask._start_auto_battle` |
 | 最近卡带 → 点击快速切换 | 快速切换页 `quick_switch_page` | `CartridgeHomeMixin.open_cartridge_quick_switcher` |
+| 生活卡带第二格 → 梦幻广场 | 广场模板 `square` | `SquareGoddessTask._enter_square_from_home` |
 
 ## 待迁移
 
-- `SquareGoddessTask`：生活卡带第二格 → 梦幻广场。
 - `DailyTask`：公会、小屋入口的重复点击逻辑。
 - `auto_return_main_home`：目前已有手写状态循环，后续可收敛到同一迁移契约。
 - `MapTradeTask` / `MapCollectionTask`：长途导航中的点击与页面确认。

@@ -8,6 +8,7 @@ import numpy as np
 from qfluentwidgets import FluentIcon
 
 from src.tasks.BaseBD2Task import BaseBD2Task
+from src.tasks.business_transition import TransitionSpec
 from src.utils import task_vision
 from src.utils.calibration import FHD_1080, HD_720, QHD_1440
 from src.utils.cartridge_quick_switch import (
@@ -239,13 +240,28 @@ class SquareGoddessTask(BaseBD2Task):
 
         self.info_set("当前阶段", "选择广场卡带2号位")
         self.sleep(FIXED_CARTRIDGE_SLOT_PRE_CLICK_DELAY_SECONDS)
-        self.operate_click(*SQUARE_CARTRIDGE_SLOT_POINT, after_sleep=0.0)
 
-        if self._wait_for_template(
-            FANTASIA_SQUARE_TEMPLATE,
-            timeout=float(self.config.get("广场入场等待秒数", 30.0)),
-            name="梦幻广场",
-        ):
+        transition = self.verified_transition(
+            TransitionSpec.create(
+                "生活卡带第二格→梦幻广场",
+                ["square"],
+                timeout_seconds=0.0,
+            ),
+            observe=lambda: (
+                "square"
+                if self._wait_for_template(
+                    FANTASIA_SQUARE_TEMPLATE,
+                    timeout=float(self.config.get("广场入场等待秒数", 30.0)),
+                    name="梦幻广场",
+                )
+                else "unknown"
+            ),
+            action=lambda: self.operate_click(
+                *SQUARE_CARTRIDGE_SLOT_POINT,
+                after_sleep=0.0,
+            ),
+        )
+        if transition.ok:
             return True
 
         self._save_flow_diagnostic("square_plaza_entry_failed")
