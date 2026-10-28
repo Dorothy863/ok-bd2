@@ -267,6 +267,19 @@ class PVPTask(BaseBD2Task):
             self._clear_pvp_hub_notice_if_present()
             return True
 
+        frame = self.capture_frame()
+        boxes = self._pvp_special_page_ocr_boxes(frame, name="PVP 箱庭 OCR")
+        text = " ".join(
+            str(getattr(box, "name", ""))
+            for box in boxes
+            if getattr(box, "name", "")
+        )
+        if self._pvp_hub_ocr_matches(text):
+            self.info_set("PVP 箱庭 OCR", "通过")
+            self._clear_pvp_hub_notice_if_present()
+            return True
+        self.info_set("PVP 箱庭 OCR", "未命中")
+
         return self._enter_pvp_from_home()
 
     def _enter_pvp_from_home(self) -> bool:
@@ -472,11 +485,7 @@ class PVPTask(BaseBD2Task):
             hub = self._match(frame, PVP_MEDALS_TEMPLATE)
             last_hub_score = hub.score
             self.info_set("PVP 箱庭", f"{hub.score:.3f}")
-            normalized_text = normalize_ocr_text(text)
-            hub_ocr_matched = all(
-                normalize_ocr_text(keyword) in normalized_text
-                for keyword in PVP_BATTLE_KEYWORDS
-            )
+            hub_ocr_matched = self._pvp_hub_ocr_matches(text)
             self.info_set("PVP 箱庭 OCR", "通过" if hub_ocr_matched else "未命中")
             if self._passes(hub, PVP_MEDALS_TEMPLATE) or hub_ocr_matched:
                 if hub_candidate_at is None:
@@ -506,6 +515,14 @@ class PVPTask(BaseBD2Task):
         self._save_flow_diagnostic("pvp_hub_entry_failed")
         return False
 
+    @staticmethod
+    def _pvp_hub_ocr_matches(text: object) -> bool:
+        normalized_text = normalize_ocr_text(text)
+        return all(
+            normalize_ocr_text(keyword) in normalized_text
+            for keyword in PVP_BATTLE_KEYWORDS
+        )
+
     def _clear_pvp_hub_notice_if_present(self) -> None:
         frame = self.capture_frame()
         result = self._match(frame, PVP_HUB_NOTICE_TEMPLATE)
@@ -520,58 +537,74 @@ class PVPTask(BaseBD2Task):
         )
 
     def _start_auto_battle(self, multiplier: int) -> str:
-        self.info_set("当前阶段", "寻找 PVP 舞台")
-        if not self._click_template_until(
-            PVP_STAGE_TEMPLATE,
-            timeout=12.0,
-            name="PVP 舞台",
-            target_reference_offset=PVP_STAGE_CLICK_REFERENCE_OFFSET,
-            after_sleep=3.0,
-        ):
-            self._recover_stage_position()
+        try:
+            free_ap_text = self._read_free_ap_counter()
+        except Exception as exc:  # noqa: BLE001 - 诊断读取失败不应阻断正常流程
+            self.log_warning(f"镜中之战：读取免费 AP 余量失败：{exc}")
+            free_ap_text = ""
+        if re.fullmatch(PVP_FREE_AP_EMPTY_PATTERN, free_ap_text):
+            self.info_set("PVP 免费AP余量", free_ap_text)
+            self.info_set("PVP 免费AP", "已耗尽")
+            self.log_info("镜中之战：免费鲜血鸡尾酒余量为 0，流程结束。")
+            return "ap_depleted"
+
+        menu_open, existing_menu_text = self._auto_battle_menu_is_open()
+        if menu_open:
+            self.info_set("当前阶段", "自动战斗菜单已打开")
+            self.info_set("PVP 自动战斗 OCR", existing_menu_text or "-")
+        else:
+            self.info_set("当前阶段", "寻找 PVP 舞台")
             if not self._click_template_until(
                 PVP_STAGE_TEMPLATE,
-                timeout=8.0,
+                timeout=12.0,
                 name="PVP 舞台",
                 target_reference_offset=PVP_STAGE_CLICK_REFERENCE_OFFSET,
                 after_sleep=3.0,
             ):
-                self.log_info("镜中之战：未找到 PVP 舞台物件。")
+                self._recover_stage_position()
+                if not self._click_template_until(
+                    PVP_STAGE_TEMPLATE,
+                    timeout=8.0,
+                    name="PVP 舞台",
+                    target_reference_offset=PVP_STAGE_CLICK_REFERENCE_OFFSET,
+                    after_sleep=3.0,
+                ):
+                    self.log_info("镜中之战：未找到 PVP 舞台物件。")
+                    return "failed"
+
+            self.info_set("当前阶段", "打开自动战斗")
+            found_auto, text = self._wait_for_ocr_patterns(
+                [r"自动战斗", r"自动"],
+                timeout=float(self.config.get("PVP 菜单等待秒数", 12.0)),
+                name="PVP 自动战斗",
+                roi=PVP_AUTO_BATTLE_SCREEN_ROI,
+            )
+            self.info_set("PVP 自动战斗 OCR", text or "-")
+            if not found_auto:
+                self.log_info("镜中之战：点击舞台后未出现自动战斗菜单。")
+                self._save_flow_diagnostic("pvp_auto_battle_failed")
                 return "failed"
 
-        self.info_set("当前阶段", "打开自动战斗")
-        found_auto, text = self._wait_for_ocr_patterns(
-            [r"自动战斗", r"自动"],
-            timeout=float(self.config.get("PVP 菜单等待秒数", 12.0)),
-            name="PVP 自动战斗",
-            roi=PVP_AUTO_BATTLE_SCREEN_ROI,
-        )
-        self.info_set("PVP 自动战斗 OCR", text or "-")
-        if not found_auto:
-            self.log_info("镜中之战：点击舞台后未出现自动战斗菜单。")
-            self._save_flow_diagnostic("pvp_auto_battle_failed")
-            return "failed"
-
-        if not self._click_ocr_pattern_center(
-            [r"自动战斗", r"自动"],
-            name="PVP 自动战斗",
-            roi=PVP_AUTO_BATTLE_SCREEN_ROI,
-            after_sleep=1.0,
-        ):
-            self.info_set("PVP 自动战斗点击", "OCR框中心不可用，使用相对比例回退")
-            self._click_screen_reference(
-                *PVP_AUTO_BATTLE_CLICK_REFERENCE,
+            if not self._click_ocr_pattern_center(
+                [r"自动战斗", r"自动"],
+                name="PVP 自动战斗",
+                roi=PVP_AUTO_BATTLE_SCREEN_ROI,
                 after_sleep=1.0,
+            ):
+                self.info_set("PVP 自动战斗点击", "OCR框中心不可用，使用相对比例回退")
+                self._click_screen_reference(
+                    *PVP_AUTO_BATTLE_CLICK_REFERENCE,
+                    after_sleep=1.0,
+                )
+            found_menu, menu_text = self._wait_for_ocr_patterns(
+                [r"鲜血鸡尾酒"],
+                timeout=8.0,
+                name="PVP 自动战斗菜单",
+                roi=self._mf_roi(327, 165, 417, 156),
             )
-        found_menu, menu_text = self._wait_for_ocr_patterns(
-            [r"鲜血鸡尾酒"],
-            timeout=8.0,
-            name="PVP 自动战斗菜单",
-            roi=self._mf_roi(327, 165, 417, 156),
-        )
-        self.info_set("PVP 自动战斗 OCR", menu_text or "-")
-        if not found_menu:
-            return "failed"
+            self.info_set("PVP 自动战斗 OCR", menu_text or "-")
+            if not found_menu:
+                return "failed"
 
         free_ap_state = self._ensure_free_ap_enabled()
         if free_ap_state == "depleted":
@@ -586,6 +619,18 @@ class PVPTask(BaseBD2Task):
         self.info_set("PVP 开始战斗 OCR", "跳过前置 OCR，按固定比例点击")
         self._click_screen_reference(1381, 1061, after_sleep=2.0)
         return self._wait_battle_start_or_ap_shortage(multiplier)
+
+    def _auto_battle_menu_is_open(self) -> tuple[bool, str]:
+        try:
+            frame = self.capture_frame()
+            text = self._ocr_text(frame, name="PVP 自动战斗菜单探测")
+        except Exception:  # noqa: BLE001 - 探测失败时走正常舞台路径
+            return False, ""
+        normalized = normalize_ocr_text(text)
+        return (
+            normalize_ocr_text("设置鲜血鸡尾酒消耗量") in normalized
+            or normalize_ocr_text("仅使用免费鲜血鸡尾酒") in normalized
+        ), text
 
     def _wait_battle_start_or_ap_shortage(self, multiplier: int) -> str:
         timeout = float(self.config.get("PVP 战斗开始等待秒数", 30.0))
@@ -619,21 +664,7 @@ class PVPTask(BaseBD2Task):
 
     def _ensure_free_ap_enabled(self) -> str:
         self.info_set("当前阶段", "确认仅用免费鸡尾酒")
-        frame = self.capture_frame()
-        frame_height, frame_width = frame.shape[:2]
-        counter_text = ""
-        for box in self._ocr_boxes(frame, name="PVP 免费AP余量"):
-            label = str(getattr(box, "name", "") or "").strip()
-            if not re.fullmatch(PVP_FREE_AP_EMPTY_PATTERN, label):
-                continue
-            center_x = int(box.x) + int(box.width) // 2
-            center_y = int(box.y) + int(box.height) // 2
-            if (
-                center_x / max(1, frame_width) >= PVP_FREE_AP_COUNTER_MIN_X_RATIO
-                and center_y / max(1, frame_height) <= PVP_FREE_AP_COUNTER_MAX_Y_RATIO
-            ):
-                counter_text = label
-                break
+        counter_text = self._read_free_ap_counter()
         self.info_set("PVP 免费AP余量", counter_text or "-")
         if counter_text:
             self.info_set("PVP 免费AP", "已耗尽")
@@ -652,6 +683,24 @@ class PVPTask(BaseBD2Task):
         self.info_set("PVP 免费AP", "未确认")
         self.log_info("镜中之战：未能确认仅用免费鸡尾酒开关。")
         return "unconfirmed"
+
+    def _read_free_ap_counter(self, frame=None) -> str:
+        """Return the top-right free cocktail counter label, or an empty string."""
+        if frame is None:
+            frame = self.capture_frame()
+        frame_height, frame_width = frame.shape[:2]
+        for box in self._ocr_boxes(frame, name="PVP 免费AP余量"):
+            label = str(getattr(box, "name", "") or "").strip()
+            if not re.fullmatch(PVP_FREE_AP_EMPTY_PATTERN, label):
+                continue
+            center_x = int(box.x) + int(box.width) // 2
+            center_y = int(box.y) + int(box.height) // 2
+            if (
+                center_x / max(1, frame_width) >= PVP_FREE_AP_COUNTER_MIN_X_RATIO
+                and center_y / max(1, frame_height) <= PVP_FREE_AP_COUNTER_MAX_Y_RATIO
+            ):
+                return label
+        return ""
 
     def _free_ap_switch_on(self) -> bool:
         frame = self.capture_frame()

@@ -1723,6 +1723,25 @@ class PVPTaskHelperTest(unittest.TestCase):
         self.assertTrue(PVPTask._ensure_pvp_hub(task))
         self.assertEqual([True], cleared)
 
+    def test_ensure_pvp_hub_accepts_battle_page_ocr_when_template_misses(self):
+        task = object.__new__(PVPTask)
+        task.info_set = lambda *_args, **_kwargs: None
+        cleared = []
+        task._wait_for_template = lambda *_args, **_kwargs: False
+        task.capture_frame = lambda: np.zeros((1440, 2560, 3), dtype=np.uint8)
+        task._pvp_special_page_ocr_boxes = lambda *_args, **_kwargs: [
+            SimpleNamespace(name="阵形设置"),
+            SimpleNamespace(name="BATTLE"),
+            SimpleNamespace(name="自动战斗"),
+        ]
+        task._clear_pvp_hub_notice_if_present = lambda: cleared.append(True)
+        task._enter_pvp_from_home = lambda: self.fail(
+            "OCR-confirmed battle page must count as the PVP hub"
+        )
+
+        self.assertTrue(PVPTask._ensure_pvp_hub(task))
+        self.assertEqual([True], cleared)
+
     def test_return_home_from_pvp_hub_clicks_top_right_home_and_checks_home(self):
         task = object.__new__(PVPTask)
         task.config = {}
@@ -2299,6 +2318,58 @@ class PVPTaskHelperTest(unittest.TestCase):
             ],
             calls,
         )
+
+    def test_start_auto_battle_checks_zero_free_ap_before_stage_search(self):
+        task = object.__new__(PVPTask)
+        task.config = {}
+        infos = {}
+        task.info_set = lambda key, value: infos.__setitem__(key, value)
+        logs = []
+        task.log_info = logs.append
+        task._read_free_ap_counter = lambda: "0/40"
+        task._click_template_until = lambda *_args, **_kwargs: self.fail(
+            "zero free AP must not search for the PVP stage"
+        )
+
+        self.assertEqual("ap_depleted", PVPTask._start_auto_battle(task, 40))
+        self.assertEqual("0/40", infos["PVP 免费AP余量"])
+        self.assertEqual("已耗尽", infos["PVP 免费AP"])
+        self.assertIn("免费鲜血鸡尾酒余量为 0", logs[0])
+
+    def test_start_auto_battle_uses_already_open_menu_and_skips_stage_search(self):
+        task = object.__new__(PVPTask)
+        task.config = {}
+        task.info_set = lambda *_args, **_kwargs: None
+        task.log_info = lambda *_args, **_kwargs: None
+        task.log_warning = lambda *_args, **_kwargs: None
+        task._read_free_ap_counter = lambda: "40/40"
+        task._auto_battle_menu_is_open = lambda: (
+            True,
+            "设置鲜血鸡尾酒消耗量 仅使用免费鲜血鸡尾酒",
+        )
+        task._click_template_until = lambda *_args, **_kwargs: self.fail(
+            "already-open menu must skip the PVP stage search"
+        )
+        task._ensure_free_ap_enabled = lambda: "enabled"
+        task._ensure_multiplier = lambda _multiplier: True
+        task._select_max_battle_count = lambda: None
+        clicks = []
+        task._click_screen_reference = lambda x, y, after_sleep=0.0: clicks.append(
+            (x, y, after_sleep)
+        )
+        task._wait_battle_start_or_ap_shortage = lambda _multiplier: "started"
+
+        self.assertEqual("started", PVPTask._start_auto_battle(task, 40))
+        self.assertEqual([(1381, 1061, 2.0)], clicks)
+
+    def test_auto_battle_menu_detection_uses_same_frame_ocr(self):
+        task = object.__new__(PVPTask)
+        task.capture_frame = lambda: np.zeros((1440, 2560, 3), dtype=np.uint8)
+        task._ocr_text = lambda *_args, **_kwargs: (
+            "自动战斗 设置鲜血鸡尾酒消耗量 仅使用免费鲜血鸡尾酒"
+        )
+
+        self.assertTrue(PVPTask._auto_battle_menu_is_open(task)[0])
 
     def test_start_auto_battle_clicks_start_without_start_ocr_gate(self):
         task = object.__new__(PVPTask)
